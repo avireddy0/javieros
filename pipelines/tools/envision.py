@@ -2,7 +2,7 @@
 
 import os
 
-import httpx
+from tools.mcp_client import call_mcp_tool
 
 ENVISION_MCP_URL = os.getenv(
     "ENVISION_MCP_URL",
@@ -17,11 +17,6 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Search query"},
-                "count": {
-                    "type": "integer",
-                    "description": "Number of results",
-                    "default": 10,
-                },
             },
             "required": ["query"],
         },
@@ -51,17 +46,12 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "channel": {
+                "channel_id": {
                     "type": "string",
-                    "description": "Channel name or ID",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Number of messages",
-                    "default": 20,
+                    "description": "Slack channel ID",
                 },
             },
-            "required": ["channel"],
+            "required": ["channel_id"],
         },
     },
     {
@@ -70,13 +60,13 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "channel": {"type": "string", "description": "Channel ID"},
+                "channel_id": {"type": "string", "description": "Slack channel ID"},
                 "thread_ts": {
                     "type": "string",
                     "description": "Thread timestamp",
                 },
             },
-            "required": ["channel", "thread_ts"],
+            "required": ["channel_id", "thread_ts"],
         },
     },
     {
@@ -93,7 +83,7 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "project_id": {"type": "integer", "description": "Procore project ID"},
+                "project_id": {"type": "string", "description": "Procore project ID"},
             },
             "required": ["project_id"],
         },
@@ -104,7 +94,7 @@ TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "project_id": {"type": "integer", "description": "Procore project ID"},
+                "project_id": {"type": "string", "description": "Procore project ID"},
             },
             "required": ["project_id"],
         },
@@ -115,14 +105,5 @@ TOOL_NAMES = {t["name"] for t in TOOLS}
 
 
 async def call_tool(name: str, arguments: dict) -> str:
-    """Execute an Envision-MCP tool via HTTP."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            f"{ENVISION_MCP_URL}/call-tool",
-            json={"name": name, "arguments": arguments},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        content = data.get("content", [])
-        texts = [c["text"] for c in content if c.get("type") == "text"]
-        return "\n".join(texts) if texts else str(data)
+    """Execute an Envision-MCP tool via Streamable HTTP."""
+    return await call_mcp_tool(ENVISION_MCP_URL, name, arguments, timeout=60.0)

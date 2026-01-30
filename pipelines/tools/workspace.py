@@ -1,6 +1,6 @@
 """Tool definitions and HTTP caller for workspace-mcp (Gmail, Calendar, Drive)."""
 
-import httpx
+from tools.mcp_client import call_mcp_tool
 
 WORKSPACE_MCP_URL = "http://localhost:8000"
 
@@ -111,15 +111,5 @@ TOOL_NAMES = {t["name"] for t in TOOLS}
 
 
 async def call_tool(name: str, arguments: dict) -> str:
-    """Execute a workspace-mcp tool via HTTP."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{WORKSPACE_MCP_URL}/call-tool",
-            json={"name": name, "arguments": arguments},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # MCP returns {"content": [{"type": "text", "text": "..."}]}
-        content = data.get("content", [])
-        texts = [c["text"] for c in content if c.get("type") == "text"]
-        return "\n".join(texts) if texts else str(data)
+    """Execute a workspace-mcp tool via Streamable HTTP."""
+    return await call_mcp_tool(WORKSPACE_MCP_URL, name, arguments, timeout=30.0)
