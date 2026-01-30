@@ -1,0 +1,120 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: javieros
+  labels:
+    cloud.googleapis.com/location: us-central1
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        run.googleapis.com/execution-environment: gen2
+        run.googleapis.com/cloudsql-instances: flow-os-1769675656:us-central1:open-webui-db
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      serviceAccountName: open-webui-sa@flow-os-1769675656.iam.gserviceaccount.com
+      containers:
+        - name: open-webui
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/open-webui:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: db-url
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: webui-secret
+            - name: WEBUI_AUTH
+              value: "true"
+            - name: ENABLE_OPENAI_API
+              value: "true"
+            - name: ENABLE_OLLAMA_API
+              value: "false"
+            - name: OPENAI_API_BASE_URL
+              value: "http://localhost:9099"
+            - name: OPENAI_API_KEY
+              value: "0p3n-w3bu!"
+            - name: WEBUI_ADMIN_EMAIL
+              value: "jabarrios@flow.life"
+            - name: WEBUI_ADMIN_NAME
+              value: "Javier Barrios"
+            - name: ENABLE_SIGNUP
+              value: "false"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            periodSeconds: 30
+        - name: pipelines
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:latest
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: anthropic-api-key
+            - name: ENVISION_MCP_URL
+              value: "https://envision-mcp-845049957105.us-central1.run.app"
+          startupProbe:
+            tcpSocket:
+              port: 9099
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
+        - name: workspace-mcp
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/workspace-mcp:latest
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi
+          env:
+            - name: GOOGLE_DELEGATED_USER
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: google-delegated-user
+          startupProbe:
+            tcpSocket:
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
+        - name: whatsapp-bridge
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-bridge:latest
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi
+          startupProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20

@@ -1,0 +1,60 @@
+services:
+  open-webui:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgresql://openwebui:openwebui@db:5432/openwebui
+      - WEBUI_SECRET_KEY=dev-secret-key
+      - OPENAI_API_BASE_URL=http://pipelines:9099
+      - OPENAI_API_KEY=0p3n-w3bu!
+      - WEBUI_AUTH=true
+      - ENABLE_OPENAI_API=true
+      - ENABLE_OLLAMA_API=false
+    depends_on:
+      - db
+      - pipelines
+
+  pipelines:
+    build: ./pipelines
+    ports:
+      - "9099:9099"
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ENVISION_MCP_URL=https://envision-mcp-845049957105.us-central1.run.app
+      - PIPELINES_URLS=file:///app/pipelines/anthropic_pipeline.py
+    depends_on:
+      - workspace-mcp
+      - whatsapp-bridge
+
+  workspace-mcp:
+    image: workspace-mcp:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - GOOGLE_DELEGATED_USER=${GOOGLE_DELEGATED_USER}
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
+    volumes:
+      - ./secrets:/secrets:ro
+
+  whatsapp-bridge:
+    build: ./whatsapp-bridge
+    ports:
+      - "3000:3000"
+    volumes:
+      - whatsapp-data:/data
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=openwebui
+      - POSTGRES_PASSWORD=openwebui
+      - POSTGRES_DB=openwebui
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+volumes:
+  pgdata:
+  whatsapp-data:

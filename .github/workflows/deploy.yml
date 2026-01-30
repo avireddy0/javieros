@@ -1,0 +1,45 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: flow-os-1769675656
+  REGION: us-central1
+  REPO: javieros
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: github-actions@flow-os-1769675656.iam.gserviceaccount.com
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build and push images
+        run: |
+          docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/open-webui:latest .
+          docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/pipelines:latest ./pipelines
+          docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-bridge:latest ./whatsapp-bridge
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/open-webui:latest
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/pipelines:latest
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-bridge:latest
+
+      - name: Deploy
+        run: |
+          gcloud run services replace service.yaml \
+            --project=$PROJECT_ID \
+            --region=$REGION
