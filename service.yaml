@@ -1,7 +1,7 @@
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
-  name: javieros
+  name: open-webui
   labels:
     cloud.googleapis.com/location: us-central1
   annotations:
@@ -22,7 +22,7 @@ spec:
       serviceAccountName: open-webui-sa@flow-os-1769675656.iam.gserviceaccount.com
       containers:
         - name: open-webui
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/open-webui:latest
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/flow-os/open-webui:latest
           ports:
             - containerPort: 8080
           resources:
@@ -69,7 +69,7 @@ spec:
               port: 8080
             periodSeconds: 30
         - name: pipelines
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:latest
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:v1
           resources:
             limits:
               cpu: "1"
@@ -85,36 +85,6 @@ spec:
           startupProbe:
             tcpSocket:
               port: 9099
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 20
-        - name: workspace-mcp
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/workspace-mcp:latest
-          resources:
-            limits:
-              cpu: "0.5"
-              memory: 512Mi
-          env:
-            - name: GOOGLE_DELEGATED_USER
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: google-delegated-user
-          startupProbe:
-            tcpSocket:
-              port: 8000
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 20
-        - name: whatsapp-bridge
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-bridge:latest
-          resources:
-            limits:
-              cpu: "0.5"
-              memory: 512Mi
-          startupProbe:
-            tcpSocket:
-              port: 3000
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 20

@@ -55,7 +55,7 @@ class Pipeline:
             {"id": "claude-haiku-4-20250414", "name": "Claude Haiku 4"},
         ]
 
-    async def pipe(self, body: dict) -> Union[str, Iterator[str]]:
+    async def pipe(self, body: dict, **kwargs) -> Union[str, Iterator[str]]:
         try:
             import anthropic
         except ImportError:

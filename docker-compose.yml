@@ -23,26 +23,6 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ENVISION_MCP_URL=https://envision-mcp-845049957105.us-central1.run.app
       - PIPELINES_URLS=file:///app/pipelines/anthropic_pipeline.py
-    depends_on:
-      - workspace-mcp
-      - whatsapp-bridge
-
-  workspace-mcp:
-    image: workspace-mcp:latest
-    ports:
-      - "8000:8000"
-    environment:
-      - GOOGLE_DELEGATED_USER=${GOOGLE_DELEGATED_USER}
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
-    volumes:
-      - ./secrets:/secrets:ro
-
-  whatsapp-bridge:
-    build: ./whatsapp-bridge
-    ports:
-      - "3000:3000"
-    volumes:
-      - whatsapp-data:/data
 
   db:
     image: postgres:15
@@ -54,6 +34,27 @@ services:
       - pgdata:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+
+  workspace-mcp:
+    image: workspace-mcp:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - GOOGLE_DELEGATED_USER=${GOOGLE_DELEGATED_USER}
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
+    volumes:
+      - ./secrets:/secrets:ro
+    profiles:
+      - workspace
+
+  whatsapp-bridge:
+    build: ./whatsapp-bridge
+    ports:
+      - "3000:3000"
+    volumes:
+      - whatsapp-data:/data
+    profiles:
+      - whatsapp
 
 volumes:
   pgdata:
