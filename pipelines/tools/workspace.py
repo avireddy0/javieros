@@ -1,8 +1,10 @@
 """Tool definitions and HTTP caller for workspace-mcp (Gmail, Calendar, Drive)."""
 
+import os
+
 from tools.mcp_client import call_mcp_tool
 
-WORKSPACE_MCP_URL = "http://localhost:8000"
+WORKSPACE_MCP_URL = os.getenv("WORKSPACE_MCP_URL", "http://localhost:8000")
 
 TOOLS = [
     {
