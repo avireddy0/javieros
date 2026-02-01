@@ -40,16 +40,17 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: webui-secret
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: anthropic-api-key
             - name: WEBUI_AUTH
               value: "true"
             - name: ENABLE_OPENAI_API
-              value: "true"
+              value: "false"
             - name: ENABLE_OLLAMA_API
               value: "false"
-            - name: OPENAI_API_BASE_URL
-              value: "http://localhost:9099"
-            - name: OPENAI_API_KEY
-              value: "0p3n-w3bu!"
             - name: WEBUI_ADMIN_EMAIL
               value: "jabarrios@flow.life"
             - name: WEBUI_ADMIN_NAME
@@ -57,7 +58,7 @@ spec:
             - name: ENABLE_SIGNUP
               value: "false"
             - name: DEFAULT_MODELS
-              value: "anthropic_pipeline.claude-opus-4-5-20251101"
+              value: "claude-opus-4-5-20251101"
             - name: DEFAULT_USER_ROLE
               value: "pending"
             - name: ENABLE_COMMUNITY_SHARING
@@ -76,6 +77,9 @@ spec:
               value: ""
             - name: WEBUI_URL
               value: "https://open-webui-210087613384.us-central1.run.app"
+            # MCP: Envision-MCP registered as native external tool
+            - name: MCP_SERVER_CONFIG
+              value: '{"envision":{"url":"https://envision-mcp-845049957105.us-central1.run.app/mcp","transport":"streamable-http"}}'
           startupProbe:
             httpGet:
               path: /health
@@ -88,25 +92,3 @@ spec:
               path: /health
               port: 8080
             periodSeconds: 30
-        - name: pipelines
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:latest
-          resources:
-            limits:
-              cpu: "1"
-              memory: 1Gi
-          env:
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: latest
-                  name: anthropic-api-key
-            - name: ENVISION_MCP_URL
-              value: "https://envision-mcp-845049957105.us-central1.run.app"
-            - name: WORKSPACE_MCP_URL
-              value: "https://workspace-mcp-210087613384.us-central1.run.app"
-          startupProbe:
-            tcpSocket:
-              port: 9099
-            initialDelaySeconds: 5
-            periodSeconds: 5
-            failureThreshold: 20

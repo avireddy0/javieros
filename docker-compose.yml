@@ -6,23 +6,13 @@ services:
     environment:
       - DATABASE_URL=postgresql://openwebui:openwebui@db:5432/openwebui
       - WEBUI_SECRET_KEY=dev-secret-key
-      - OPENAI_API_BASE_URL=http://pipelines:9099
-      - OPENAI_API_KEY=0p3n-w3bu!
       - WEBUI_AUTH=true
       - ENABLE_OPENAI_API=true
       - ENABLE_OLLAMA_API=false
+      # Native Anthropic — no pipelines proxy needed
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       - db
-      - pipelines
-
-  pipelines:
-    build: ./pipelines
-    ports:
-      - "9099:9099"
-    environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ENVISION_MCP_URL=https://envision-mcp-845049957105.us-central1.run.app
-      - PIPELINES_URLS=file:///app/pipelines/anthropic_pipeline.py
 
   db:
     image: postgres:15
@@ -35,17 +25,46 @@ services:
     ports:
       - "5432:5432"
 
-  workspace-mcp:
-    image: workspace-mcp:latest
+  # ── MCPO bridges ────────────────────────────────────────────
+  # Each wraps a stdio MCP server as an OpenAPI HTTP endpoint.
+  # Register in Open WebUI → Admin → Settings → Tools → Add Connection
+
+  gmail-calendar:
+    image: ghcr.io/open-webui/mcpo:main
     ports:
-      - "8000:8000"
+      - "8001:8000"
     environment:
-      - GOOGLE_DELEGATED_USER=${GOOGLE_DELEGATED_USER}
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/service-account.json
-    volumes:
-      - ./secrets:/secrets:ro
-    profiles:
-      - workspace
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=http://localhost:8001/oauth/callback
+    command:
+      - --port
+      - "8000"
+      - --
+      - npx
+      - -y
+      - "@anthropic/google-workspace-mcp"
+    restart: unless-stopped
+
+  slack:
+    image: ghcr.io/open-webui/mcpo:main
+    ports:
+      - "8002:8000"
+    environment:
+      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
+      - SLACK_TEAM_ID=${SLACK_TEAM_ID}
+    command:
+      - --port
+      - "8000"
+      - --
+      - npx
+      - -y
+      - "@anthropic/slack-mcp"
+    restart: unless-stopped
+
+  # ── WhatsApp ────────────────────────────────────────────────
+  # whatsapp-bridge: headless Chrome + whatsapp-web.js (QR auth)
+  # whatsapp-api:   FastAPI wrapper registered as OpenAPI tool server
 
   whatsapp-bridge:
     build: ./whatsapp-bridge
@@ -53,8 +72,17 @@ services:
       - "3000:3000"
     volumes:
       - whatsapp-data:/data
-    profiles:
-      - whatsapp
+    restart: unless-stopped
+
+  whatsapp-api:
+    build: ./servers/whatsapp
+    ports:
+      - "8003:8000"
+    environment:
+      - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:3000
+    depends_on:
+      - whatsapp-bridge
+    restart: unless-stopped
 
 volumes:
   pgdata:
