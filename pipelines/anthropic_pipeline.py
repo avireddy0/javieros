@@ -131,8 +131,9 @@ class Pipeline:
         tools = _anthropic_tools()
         loop = asyncio.new_event_loop()
 
-        # Workspace tools get per-user email pass-through
+        # Per-user ACL pass-through
         workspace_tools = workspace.TOOL_NAMES
+        envision_tools = envision.TOOL_NAMES
 
         try:
             for _round in range(MAX_TOOL_ROUNDS):
@@ -179,7 +180,7 @@ class Pipeline:
                     else:
                         try:
                             call_kwargs = {}
-                            if tc.name in workspace_tools and user_email:
+                            if user_email and tc.name in (workspace_tools | envision_tools):
                                 call_kwargs["user_email"] = user_email
                             result_text = loop.run_until_complete(
                                 call_fn(tc.name, tc.input, **call_kwargs)
