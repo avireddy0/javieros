@@ -66,32 +66,6 @@ class Pipeline:
         self.type = "manifold"
         self.name = "Gemini: "
         self.valves = self.Valves()
-        self._init_vertex()
-
-    def _init_vertex(self):
-        """Initialize Vertex AI with service account credentials."""
-        try:
-            import vertexai
-
-            sa_json = os.getenv("GOOGLE_SA_JSON", "")
-            if sa_json:
-                from google.oauth2 import service_account
-
-                creds = service_account.Credentials.from_service_account_info(
-                    json.loads(sa_json)
-                )
-                vertexai.init(
-                    project=self.valves.GCP_PROJECT_ID,
-                    location=self.valves.GCP_LOCATION,
-                    credentials=creds,
-                )
-            else:
-                vertexai.init(
-                    project=self.valves.GCP_PROJECT_ID,
-                    location=self.valves.GCP_LOCATION,
-                )
-        except Exception:
-            pass
 
     def pipelines(self) -> list[dict]:
         return [
@@ -100,10 +74,9 @@ class Pipeline:
         ]
 
     def pipe(self, body: dict, **kwargs) -> Union[str, Iterator[str]]:
-        try:
-            from vertexai.generative_models import GenerativeModel
-        except ImportError:
-            return "Error: google-cloud-aiplatform not installed."
+        import httpx
+        import google.auth
+        import google.auth.transport.requests
 
         model_id = body["model"]
         if "." in model_id:
@@ -125,17 +98,33 @@ class Pipeline:
                 contents.append({"role": "model", "parts": [{"text": text}]})
 
         try:
-            model = GenerativeModel(
-                model_id,
-                system_instruction=system_instruction,
+            creds, _ = google.auth.default()
+            creds.refresh(google.auth.transport.requests.Request())
+
+            location = self.valves.GCP_LOCATION
+            project = self.valves.GCP_PROJECT_ID
+            url = (
+                f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
+                f"/locations/{location}/publishers/google/models/{model_id}:generateContent"
             )
-            response = model.generate_content(
-                contents,
-                generation_config={
-                    "max_output_tokens": body.get("max_tokens", 8192),
+
+            payload = {
+                "contents": contents,
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "generationConfig": {
+                    "maxOutputTokens": body.get("max_tokens", 8192),
                     "temperature": body.get("temperature", 1.0),
                 },
+            }
+
+            resp = httpx.post(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {creds.token}"},
+                timeout=120.0,
             )
-            return response.text
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
             return f"Error: Gemini API error — {e}"
