@@ -103,8 +103,14 @@ class Pipeline:
 
             location = self.valves.GCP_LOCATION
             project = self.valves.GCP_PROJECT_ID
+            # "global" uses aiplatform.googleapis.com; regional uses {region}-aiplatform...
+            host = (
+                "aiplatform.googleapis.com"
+                if location == "global"
+                else f"{location}-aiplatform.googleapis.com"
+            )
             url = (
-                f"https://{location}-aiplatform.googleapis.com/v1/projects/{project}"
+                f"https://{host}/v1/projects/{project}"
                 f"/locations/{location}/publishers/google/models/{model_id}:generateContent"
             )
 
