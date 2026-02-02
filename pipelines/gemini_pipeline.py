@@ -60,7 +60,7 @@ class Pipeline:
         GCP_PROJECT_ID: str = Field(
             default="flow-os-1769675656", description="GCP Project ID"
         )
-        GCP_LOCATION: str = Field(default="global", description="GCP region")
+        GCP_LOCATION: str = Field(default="us-central1", description="GCP region")
 
     def __init__(self):
         self.type = "manifold"
@@ -95,8 +95,8 @@ class Pipeline:
 
     def pipelines(self) -> list[dict]:
         return [
-            {"id": "gemini-3-pro-preview", "name": "Gemini 3 Pro Preview"},
-            {"id": "gemini-3-flash-preview", "name": "Gemini 3 Flash Preview"},
+            {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro"},
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
         ]
 
     def pipe(self, body: dict, **kwargs) -> Union[str, Iterator[str]]:
