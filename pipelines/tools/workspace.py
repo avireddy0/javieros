@@ -5,7 +5,7 @@ import os
 from tools.mcp_client import call_mcp_tool
 
 WORKSPACE_MCP_URL = os.getenv("WORKSPACE_MCP_URL", "http://localhost:8000")
-GOOGLE_USER_EMAIL = os.getenv("GOOGLE_DELEGATED_USER", "jabarrios@flow.life")
+GOOGLE_USER_EMAIL = os.getenv("GOOGLE_DELEGATED_USER", "avi@envsn.com")
 
 TOOLS = [
     {
@@ -124,7 +124,7 @@ TOOL_NAMES = {t["name"] for t in TOOLS}
 
 async def call_tool(name: str, arguments: dict) -> str:
     """Execute a workspace-mcp tool via Streamable HTTP."""
-    # Workspace-MCP requires user_google_email for domain-wide delegation
+    # Workspace-MCP requires user_google_email (overridden by OAuth user anyway)
     if "user_google_email" not in arguments:
         arguments["user_google_email"] = GOOGLE_USER_EMAIL
     return await call_mcp_tool(WORKSPACE_MCP_URL, name, arguments, timeout=30.0)

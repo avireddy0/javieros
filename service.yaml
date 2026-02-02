@@ -113,7 +113,7 @@ spec:
             - name: WORKSPACE_MCP_URL
               value: "https://workspace-mcp-210087613384.us-central1.run.app"
             - name: GOOGLE_DELEGATED_USER
-              value: "jabarrios@flow.life"
+              value: "avi@envsn.com"
           startupProbe:
             tcpSocket:
               port: 9099
