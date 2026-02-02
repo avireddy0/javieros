@@ -62,7 +62,7 @@ spec:
             - name: ENABLE_SIGNUP
               value: "false"
             - name: DEFAULT_MODELS
-              value: "anthropic_pipeline.claude-opus-4-5-20251101"
+              value: ""
             - name: DEFAULT_USER_ROLE
               value: "pending"
             - name: ENABLE_COMMUNITY_SHARING
