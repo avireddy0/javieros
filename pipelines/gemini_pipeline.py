@@ -73,7 +73,7 @@ class Pipeline:
             {"id": "gemini-3-flash-preview", "name": "Gemini 3 Flash Preview"},
         ]
 
-    def pipe(self, body: dict, **kwargs) -> Union[str, Iterator[str]]:
+    def pipe(self, body: dict, __user__: dict | None = None, **kwargs) -> Union[str, Iterator[str]]:
         import httpx
         import google.auth
         import google.auth.transport.requests

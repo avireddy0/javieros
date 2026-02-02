@@ -97,7 +97,7 @@ class Pipeline:
             {"id": "claude-opus-4-5-20251101", "name": "Claude Opus 4.5"},
         ]
 
-    def pipe(self, body: dict, **kwargs) -> Union[str, Iterator[str]]:
+    def pipe(self, body: dict, __user__: dict | None = None, **kwargs) -> Union[str, Iterator[str]]:
         try:
             import anthropic
         except ImportError:
@@ -112,6 +112,7 @@ class Pipeline:
         )
 
         model_id = "claude-opus-4-5-20251101"
+        user_email = (__user__ or {}).get("email")
 
         messages = []
         system_message = SYSTEM_PROMPT
@@ -121,14 +122,17 @@ class Pipeline:
             else:
                 messages.append({"role": msg["role"], "content": msg["content"]})
 
-        return self._agentic_loop(client, model_id, messages, system_message)
+        return self._agentic_loop(client, model_id, messages, system_message, user_email=user_email)
 
-    def _agentic_loop(self, client, model_id, messages, system_message):
+    def _agentic_loop(self, client, model_id, messages, system_message, user_email: str | None = None):
         """Run Claude with tool use in a loop until it produces a final text response."""
         import anthropic
 
         tools = _anthropic_tools()
         loop = asyncio.new_event_loop()
+
+        # Workspace tools get per-user email pass-through
+        workspace_tools = workspace.TOOL_NAMES
 
         try:
             for _round in range(MAX_TOOL_ROUNDS):
@@ -174,9 +178,15 @@ class Pipeline:
                         result_text = f"Error: Unknown tool '{tc.name}'"
                     else:
                         try:
+                            call_kwargs = {}
+                            if tc.name in workspace_tools and user_email:
+                                call_kwargs["user_email"] = user_email
                             result_text = loop.run_until_complete(
-                                call_fn(tc.name, tc.input)
+                                call_fn(tc.name, tc.input, **call_kwargs)
                             )
+                            # If workspace-mcp returns an OAuth URL, surface it
+                            if tc.name in workspace_tools and result_text and "accounts.google.com" in result_text:
+                                yield f"\n\n🔐 **Google sign-in required:** [Click here to connect your Google account]({result_text.strip()})\n\nOnce you've signed in, ask me again and I'll have access to your email and calendar."
                         except Exception as e:
                             logger.exception("Tool call failed: %s", tc.name)
                             result_text = f"Error calling {tc.name}: {e}"
