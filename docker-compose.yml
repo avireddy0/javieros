@@ -25,43 +25,6 @@ services:
     ports:
       - "5432:5432"
 
-  # ── MCPO bridges ────────────────────────────────────────────
-  # Each wraps a stdio MCP server as an OpenAPI HTTP endpoint.
-  # Register in Open WebUI → Admin → Settings → Tools → Add Connection
-
-  gmail-calendar:
-    image: ghcr.io/open-webui/mcpo:main
-    ports:
-      - "8001:8000"
-    environment:
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-      - GOOGLE_REDIRECT_URI=http://localhost:8001/oauth/callback
-    command:
-      - --port
-      - "8000"
-      - --
-      - npx
-      - -y
-      - "@anthropic/google-workspace-mcp"
-    restart: unless-stopped
-
-  slack:
-    image: ghcr.io/open-webui/mcpo:main
-    ports:
-      - "8002:8000"
-    environment:
-      - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
-      - SLACK_TEAM_ID=${SLACK_TEAM_ID}
-    command:
-      - --port
-      - "8000"
-      - --
-      - npx
-      - -y
-      - "@anthropic/slack-mcp"
-    restart: unless-stopped
-
   # ── WhatsApp ────────────────────────────────────────────────
   # whatsapp-bridge: headless Chrome + whatsapp-web.js (QR auth)
   # whatsapp-api:   FastAPI wrapper registered as OpenAPI tool server
@@ -70,6 +33,8 @@ services:
     build: ./whatsapp-bridge
     ports:
       - "3000:3000"
+    environment:
+      - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN}
     volumes:
       - whatsapp-data:/data
     restart: unless-stopped
@@ -80,6 +45,8 @@ services:
       - "8003:8000"
     environment:
       - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:3000
+      - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN}
+      - WHATSAPP_API_TOKEN=${WHATSAPP_API_TOKEN}
     depends_on:
       - whatsapp-bridge
     restart: unless-stopped

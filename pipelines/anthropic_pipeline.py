@@ -2,8 +2,8 @@
 Javier OS — Agentic Claude Pipeline for Open WebUI.
 
 Uses Claude Opus 4.5 with extended thinking and real tool calling.
-Tools are dispatched to Envision-MCP and WhatsApp bridge.
-Note: Gmail/Calendar/Drive tools removed - use native MCP integration with OAuth instead.
+Tools are dispatched only to the WhatsApp bridge. All other integrations
+are now native External Tools in Open WebUI.
 """
 
 import asyncio
@@ -20,7 +20,7 @@ _pipelines_dir = str(Path(__file__).resolve().parent)
 if _pipelines_dir not in sys.path:
     sys.path.insert(0, _pipelines_dir)
 
-from tools import envision, whatsapp
+from tools import whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ Philosophy:
 - Urban ring development — existing infrastructure, schools, transportation
 - Financial innovation: CerPI for institutional co-investment with discretionary control
 
-You have access to live integrations — USE THEM when the user asks about emails, calendar, Slack, projects, RFIs, budgets, or WhatsApp. Call the appropriate tool; do not pretend or simulate results.
+You have access to live integrations via Open WebUI External Tools. Use them when available and do not pretend or simulate results.
 
 Key behaviors:
 - Be concise and action-oriented. Javier is busy — get to the point.
@@ -55,15 +55,11 @@ Key behaviors:
 - For financial questions, provide specific dollar amounts and variance analysis.
 - When switching languages mid-conversation, follow the user's lead naturally."""
 
-# Build unified tool list for Claude API
-ALL_TOOLS = envision.TOOLS + whatsapp.TOOLS
+# Build unified tool list for Claude API (WhatsApp only)
+ALL_TOOLS = whatsapp.TOOLS
 
 # Map tool names to their call functions
-TOOL_DISPATCH = {}
-for t in envision.TOOLS:
-    TOOL_DISPATCH[t["name"]] = envision.call_tool
-for t in whatsapp.TOOLS:
-    TOOL_DISPATCH[t["name"]] = whatsapp.call_tool
+TOOL_DISPATCH = {t["name"]: whatsapp.call_tool for t in whatsapp.TOOLS}
 
 MAX_TOOL_ROUNDS = 5
 
@@ -130,8 +126,7 @@ class Pipeline:
         tools = _anthropic_tools()
         loop = asyncio.new_event_loop()
 
-        # Per-user ACL pass-through
-        envision_tools = envision.TOOL_NAMES
+        whatsapp_tools = whatsapp.TOOL_NAMES
 
         try:
             for _round in range(MAX_TOOL_ROUNDS):
@@ -178,7 +173,7 @@ class Pipeline:
                     else:
                         try:
                             call_kwargs = {}
-                            if user_email and tc.name in envision_tools:
+                            if user_email and tc.name in whatsapp_tools:
                                 call_kwargs["user_email"] = user_email
                             result_text = loop.run_until_complete(
                                 call_fn(tc.name, tc.input, **call_kwargs)

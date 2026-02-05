@@ -1,10 +1,17 @@
 """Tool definitions and HTTP caller for WhatsApp bridge (whatsapp-web.js sidecar)."""
 
 import base64
+import os
 
 import httpx
 
-WHATSAPP_BRIDGE_URL = "http://localhost:3000"
+WHATSAPP_BRIDGE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://localhost:3000")
+WHATSAPP_BRIDGE_TOKEN = os.getenv("WHATSAPP_BRIDGE_TOKEN", "")
+WHATSAPP_ALLOWED_EMAILS = {
+    e.strip().lower()
+    for e in os.getenv("WHATSAPP_ALLOWED_EMAILS", "").split(",")
+    if e.strip()
+}
 
 TOOLS = [
     {
@@ -62,8 +69,11 @@ TOOLS = [
 TOOL_NAMES = {t["name"] for t in TOOLS}
 
 
-async def call_tool(name: str, arguments: dict) -> str:
+async def call_tool(name: str, arguments: dict, user_email: str | None = None) -> str:
     """Execute a WhatsApp bridge action via HTTP."""
+    if WHATSAPP_ALLOWED_EMAILS:
+        if not user_email or user_email.lower() not in WHATSAPP_ALLOWED_EMAILS:
+            return "Error: WhatsApp tools are restricted for this user."
     endpoint_map = {
         "whatsapp_send": "/send",
         "whatsapp_messages": "/messages",
@@ -72,12 +82,22 @@ async def call_tool(name: str, arguments: dict) -> str:
     }
     endpoint = endpoint_map[name]
 
+    headers = {}
+    if WHATSAPP_BRIDGE_TOKEN:
+        headers["X-WhatsApp-Bridge-Token"] = WHATSAPP_BRIDGE_TOKEN
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         if name == "whatsapp_status":
-            resp = await client.get(f"{WHATSAPP_BRIDGE_URL}{endpoint}")
+            resp = await client.get(
+                f"{WHATSAPP_BRIDGE_URL}{endpoint}",
+                headers=headers,
+            )
             return resp.text
         elif name == "whatsapp_qr":
-            resp = await client.get(f"{WHATSAPP_BRIDGE_URL}{endpoint}")
+            resp = await client.get(
+                f"{WHATSAPP_BRIDGE_URL}{endpoint}",
+                headers=headers,
+            )
             # Check if it's JSON (status message) or PNG (actual QR)
             content_type = resp.headers.get("content-type", "")
             if "image/png" in content_type:
@@ -89,6 +109,7 @@ async def call_tool(name: str, arguments: dict) -> str:
             resp = await client.post(
                 f"{WHATSAPP_BRIDGE_URL}{endpoint}",
                 json=arguments,
+                headers=headers,
             )
             resp.raise_for_status()
             return resp.text

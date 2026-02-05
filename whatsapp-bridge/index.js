@@ -13,6 +13,14 @@ const client = new Client({
   puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
 })
 
+function requireBridgeAuth(req, res) {
+  const token = process.env.WHATSAPP_BRIDGE_TOKEN
+  if (!token) return true
+  if (req.get('X-WhatsApp-Bridge-Token') === token) return true
+  res.status(401).json({ error: 'Unauthorized' })
+  return false
+}
+
 client.on('qr', (qr) => {
   qrData = qr
   console.log('QR code received — scan at /qr')
@@ -32,6 +40,7 @@ client.on('disconnected', () => {
 client.initialize()
 
 app.get('/qr', async (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
   if (isReady) return res.json({ status: 'connected', message: 'Already authenticated' })
   if (!qrData) return res.json({ status: 'waiting', message: 'No QR code yet, please wait' })
   const png = await QRCode.toBuffer(qrData)
@@ -39,6 +48,7 @@ app.get('/qr', async (req, res) => {
 })
 
 app.get('/status', (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
   res.json({
     connected: isReady,
     qr_available: !!qrData,
@@ -46,6 +56,7 @@ app.get('/status', (req, res) => {
 })
 
 app.post('/send', async (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
   if (!isReady) return res.status(503).json({ error: 'WhatsApp not connected' })
   const { to, message } = req.body
   try {
@@ -58,6 +69,7 @@ app.post('/send', async (req, res) => {
 })
 
 app.post('/messages', async (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
   if (!isReady) return res.status(503).json({ error: 'WhatsApp not connected' })
   const { chat_id, limit = 20 } = req.body
   try {
