@@ -1,5 +1,7 @@
 """Tool definitions and HTTP caller for WhatsApp bridge (whatsapp-web.js sidecar)."""
 
+import base64
+
 import httpx
 
 WHATSAPP_BRIDGE_URL = "http://localhost:3000"
@@ -47,6 +49,14 @@ TOOLS = [
             "properties": {},
         },
     },
+    {
+        "name": "whatsapp_qr",
+        "description": "Get the WhatsApp QR code for authentication. Returns base64-encoded PNG image that can be displayed to the user for scanning.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 TOOL_NAMES = {t["name"] for t in TOOLS}
@@ -58,16 +68,27 @@ async def call_tool(name: str, arguments: dict) -> str:
         "whatsapp_send": "/send",
         "whatsapp_messages": "/messages",
         "whatsapp_status": "/status",
+        "whatsapp_qr": "/qr",
     }
     endpoint = endpoint_map[name]
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         if name == "whatsapp_status":
             resp = await client.get(f"{WHATSAPP_BRIDGE_URL}{endpoint}")
+            return resp.text
+        elif name == "whatsapp_qr":
+            resp = await client.get(f"{WHATSAPP_BRIDGE_URL}{endpoint}")
+            # Check if it's JSON (status message) or PNG (actual QR)
+            content_type = resp.headers.get("content-type", "")
+            if "image/png" in content_type:
+                b64 = base64.b64encode(resp.content).decode()
+                return f"![WhatsApp QR Code](data:image/png;base64,{b64})\n\nScan this QR code with WhatsApp on your phone to connect."
+            else:
+                return resp.text
         else:
             resp = await client.post(
                 f"{WHATSAPP_BRIDGE_URL}{endpoint}",
                 json=arguments,
             )
-        resp.raise_for_status()
-        return resp.text
+            resp.raise_for_status()
+            return resp.text
