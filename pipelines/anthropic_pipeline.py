@@ -2,7 +2,8 @@
 Javier OS — Agentic Claude Pipeline for Open WebUI.
 
 Uses Claude Opus 4.5 with extended thinking and real tool calling.
-Tools are dispatched to Envision-MCP, Workspace-MCP, and WhatsApp bridge.
+Tools are dispatched to Envision-MCP and WhatsApp bridge.
+Note: Gmail/Calendar/Drive tools removed - use native MCP integration with OAuth instead.
 """
 
 import asyncio
@@ -19,7 +20,7 @@ _pipelines_dir = str(Path(__file__).resolve().parent)
 if _pipelines_dir not in sys.path:
     sys.path.insert(0, _pipelines_dir)
 
-from tools import envision, workspace, whatsapp
+from tools import envision, whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +56,12 @@ Key behaviors:
 - When switching languages mid-conversation, follow the user's lead naturally."""
 
 # Build unified tool list for Claude API
-ALL_TOOLS = envision.TOOLS + workspace.TOOLS + whatsapp.TOOLS
+ALL_TOOLS = envision.TOOLS + whatsapp.TOOLS
 
 # Map tool names to their call functions
 TOOL_DISPATCH = {}
 for t in envision.TOOLS:
     TOOL_DISPATCH[t["name"]] = envision.call_tool
-for t in workspace.TOOLS:
-    TOOL_DISPATCH[t["name"]] = workspace.call_tool
 for t in whatsapp.TOOLS:
     TOOL_DISPATCH[t["name"]] = whatsapp.call_tool
 
@@ -132,7 +131,6 @@ class Pipeline:
         loop = asyncio.new_event_loop()
 
         # Per-user ACL pass-through
-        workspace_tools = workspace.TOOL_NAMES
         envision_tools = envision.TOOL_NAMES
 
         try:
@@ -180,14 +178,11 @@ class Pipeline:
                     else:
                         try:
                             call_kwargs = {}
-                            if user_email and tc.name in (workspace_tools | envision_tools):
+                            if user_email and tc.name in envision_tools:
                                 call_kwargs["user_email"] = user_email
                             result_text = loop.run_until_complete(
                                 call_fn(tc.name, tc.input, **call_kwargs)
                             )
-                            # If workspace-mcp returns an OAuth URL, surface it
-                            if tc.name in workspace_tools and result_text and "accounts.google.com" in result_text:
-                                yield f"\n\n🔐 **Google sign-in required:** [Click here to connect your Google account]({result_text.strip()})\n\nOnce you've signed in, ask me again and I'll have access to your email and calendar."
                         except Exception as e:
                             logger.exception("Tool call failed: %s", tc.name)
                             result_text = f"Error calling {tc.name}: {e}"
