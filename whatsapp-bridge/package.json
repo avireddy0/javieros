@@ -1,14 +1,14 @@
 {
   "name": "whatsapp-bridge",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "express": "^4.21.0",
-    "puppeteer": "^22.0.0",
-    "qrcode": "^1.5.4",
-    "whatsapp-web.js": "^1.26.0"
+    "pino": "^10.3.0",
+    "qrcode": "^1.5.4"
   }
 }
