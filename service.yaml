@@ -125,6 +125,9 @@ spec:
           env:
             - name: PORT
               value: "3000"
+          volumeMounts:
+            - name: whatsapp-sessions
+              mountPath: /data/whatsapp-session
           startupProbe:
             httpGet:
               path: /status
@@ -132,3 +135,9 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 30
+      volumes:
+        - name: whatsapp-sessions
+          csi:
+            driver: gcsfuse.run.googleapis.com
+            volumeAttributes:
+              bucketName: javieros-whatsapp-sessions
