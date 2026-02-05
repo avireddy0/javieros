@@ -7,11 +7,84 @@ app.use(express.json())
 
 let qrData = null
 let isReady = false
+let client = null
+let initPromise = null
 
-const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: '/data/whatsapp-session' }),
-  puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] },
-})
+const PUPPETEER_ARGS = [
+  '--no-sandbox',
+  '--disable-setuid-sandbox',
+  '--disable-dev-shm-usage',
+  '--disable-gpu',
+  '--disable-software-rasterizer',
+  '--no-first-run',
+  '--no-zygote',
+  '--single-process',
+  '--disable-accelerated-2d-canvas',
+  '--disable-web-security',
+  '--disable-features=IsolateOrigins',
+  '--disable-site-isolation-trials',
+  '--disable-extensions',
+  '--disable-background-networking',
+  '--disable-sync',
+  '--disable-translate',
+  '--metrics-recording-only',
+  '--mute-audio',
+  '--no-default-browser-check',
+]
+
+function createClient() {
+  const c = new Client({
+    authStrategy: new LocalAuth({ dataPath: '/data/whatsapp-session' }),
+    puppeteer: {
+      headless: true,
+      args: PUPPETEER_ARGS,
+      timeout: 60000,
+    },
+  })
+
+  c.on('qr', (qr) => {
+    qrData = qr
+    console.log('QR code received — scan at /qr')
+  })
+
+  c.on('ready', () => {
+    isReady = true
+    qrData = null
+    console.log('WhatsApp client ready')
+  })
+
+  c.on('disconnected', () => {
+    isReady = false
+    console.log('WhatsApp client disconnected')
+  })
+
+  c.on('auth_failure', (msg) => {
+    console.error('Auth failure:', msg)
+  })
+
+  return c
+}
+
+async function initializeClient() {
+  if (client && isReady) return client
+  if (initPromise) return initPromise
+
+  initPromise = (async () => {
+    console.log('Initializing WhatsApp client...')
+    client = createClient()
+    try {
+      await client.initialize()
+      return client
+    } catch (err) {
+      console.error('Client init failed:', err.message)
+      client = null
+      initPromise = null
+      throw err
+    }
+  })()
+
+  return initPromise
+}
 
 function requireBridgeAuth(req, res) {
   const token = process.env.WHATSAPP_BRIDGE_TOKEN
@@ -21,38 +94,61 @@ function requireBridgeAuth(req, res) {
   return false
 }
 
-client.on('qr', (qr) => {
-  qrData = qr
-  console.log('QR code received — scan at /qr')
+// Health check - doesn't require client
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', version: '2.0.0' })
 })
 
-client.on('ready', () => {
-  isReady = true
-  qrData = null
-  console.log('WhatsApp client ready')
-})
-
-client.on('disconnected', () => {
-  isReady = false
-  console.log('WhatsApp client disconnected')
-})
-
-client.initialize()
-
-app.get('/qr', async (req, res) => {
-  if (!requireBridgeAuth(req, res)) return
-  if (isReady) return res.json({ status: 'connected', message: 'Already authenticated' })
-  if (!qrData) return res.json({ status: 'waiting', message: 'No QR code yet, please wait' })
-  const png = await QRCode.toBuffer(qrData)
-  res.type('image/png').send(png)
-})
-
+// Status - doesn't initialize client
 app.get('/status', (req, res) => {
   if (!requireBridgeAuth(req, res)) return
   res.json({
     connected: isReady,
     qr_available: !!qrData,
+    client_initialized: !!client,
   })
+})
+
+// Initialize and get QR
+app.get('/qr', async (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
+
+  if (isReady) {
+    return res.json({ status: 'connected', message: 'Already authenticated' })
+  }
+
+  try {
+    // Start initialization if not started
+    if (!client && !initPromise) {
+      initializeClient().catch(err => console.error('Background init failed:', err.message))
+    }
+
+    // Wait a bit for QR
+    if (!qrData) {
+      await new Promise(r => setTimeout(r, 5000))
+    }
+
+    if (!qrData) {
+      return res.json({ status: 'waiting', message: 'Initializing, please wait and refresh...' })
+    }
+
+    const png = await QRCode.toBuffer(qrData)
+    res.type('image/png').send(png)
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// Start client manually
+app.post('/start', async (req, res) => {
+  if (!requireBridgeAuth(req, res)) return
+
+  try {
+    await initializeClient()
+    res.json({ status: 'initializing', message: 'Client starting...' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
 })
 
 app.post('/send', async (req, res) => {

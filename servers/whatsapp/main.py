@@ -8,12 +8,21 @@ import os
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="WhatsApp Tools",
     description="Send and read WhatsApp messages via whatsapp-web.js bridge.",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 BRIDGE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge:3000")
@@ -45,6 +54,37 @@ async def status(req: Request):
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(
             f"{BRIDGE_URL}/status",
+            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
+@app.get("/qr")
+async def get_qr(req: Request):
+    """Get QR code for WhatsApp authentication. Returns PNG image or status JSON."""
+    _require_api_auth(req)
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(
+            f"{BRIDGE_URL}/qr",
+            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
+        )
+        resp.raise_for_status()
+        # Check if response is JSON (status) or image (QR code)
+        content_type = resp.headers.get("content-type", "")
+        if "image" in content_type:
+            from fastapi.responses import Response
+            return Response(content=resp.content, media_type=content_type)
+        return resp.json()
+
+
+@app.post("/start")
+async def start_client(req: Request):
+    """Manually start the WhatsApp client initialization."""
+    _require_api_auth(req)
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            f"{BRIDGE_URL}/start",
             headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
         )
         resp.raise_for_status()
