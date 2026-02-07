@@ -7,3 +7,6 @@ node_modules/
 .DS_Store
 secrets/
 .omc/
+
+# Reverse-engineered artifacts
+reverse/

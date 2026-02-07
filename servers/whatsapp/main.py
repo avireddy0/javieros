@@ -1,123 +1,364 @@
-"""WhatsApp OpenAPI Tool Server for Open WebUI.
+"""WhatsApp OpenAPI tool server for Open WebUI."""
 
-Wraps the whatsapp-web.js bridge (whatsapp-bridge sidecar) as an
-OpenAPI-compatible tool server following the open-webui/openapi-servers pattern.
-"""
+from __future__ import annotations
 
 import os
+import secrets
+import time
+from contextlib import asynccontextmanager
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
+
+BRIDGE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge:3000").rstrip("/")
+BRIDGE_TOKEN = os.getenv("WHATSAPP_BRIDGE_TOKEN", "")
+API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
+WHATSAPP_QR_COOKIE = "whatsapp_qr_session"
+QR_SESSION_TTL_SECONDS = int(os.getenv("WHATSAPP_QR_SESSION_TTL_SECONDS", "120"))
+_qr_sessions: dict[str, float] = {}
+
+if not BRIDGE_TOKEN:
+    raise RuntimeError("WHATSAPP_BRIDGE_TOKEN is required")
+
+if not API_TOKEN:
+    raise RuntimeError("WHATSAPP_API_TOKEN is required")
+
+_origins = [
+    o.strip()
+    for o in os.getenv("WHATSAPP_ALLOWED_ORIGINS", "*").split(",")
+    if o.strip()
+]
+ALLOWED_ORIGINS = _origins or ["*"]
+ALLOW_CREDENTIALS = ALLOWED_ORIGINS != ["*"]
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    timeout = httpx.Timeout(connect=5.0, read=60.0, write=30.0, pool=10.0)
+    limits = httpx.Limits(max_keepalive_connections=20, max_connections=100)
+    app.state.bridge_client = httpx.AsyncClient(timeout=timeout, limits=limits)
+    try:
+        yield
+    finally:
+        await app.state.bridge_client.aclose()
+
 
 app = FastAPI(
     title="WhatsApp Tools",
-    description="Send and read WhatsApp messages via whatsapp-web.js bridge.",
-    version="0.1.0",
+    description="Send and read WhatsApp messages via whatsapp bridge.",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-BRIDGE_URL = os.getenv("WHATSAPP_BRIDGE_URL", "http://whatsapp-bridge:3000")
-BRIDGE_TOKEN = os.getenv("WHATSAPP_BRIDGE_TOKEN", "")
-API_TOKEN = os.getenv("WHATSAPP_API_TOKEN", "")
-
-
-def _require_api_auth(req: Request) -> None:
-    if not API_TOKEN:
-        return
-    if req.headers.get("X-WhatsApp-API-Token") != API_TOKEN:
-        raise HTTPException(401, "Unauthorized")
-
 
 class SendMessageRequest(BaseModel):
-    to: str = Field(description="Phone number with country code, e.g. +5215512345678")
-    message: str = Field(description="Message text to send")
+    to: str = Field(
+        min_length=3,
+        max_length=128,
+        description="Phone number with country code or group ID",
+    )
+    message: str = Field(
+        min_length=1, max_length=4096, description="Message text to send"
+    )
 
 
 class GetMessagesRequest(BaseModel):
-    chat_id: str = Field(description="Phone number with country code")
-    limit: int = Field(default=20, description="Number of recent messages to fetch")
+    chat_id: str = Field(
+        min_length=3, max_length=128, description="Phone number or group ID"
+    )
+    limit: int = Field(
+        default=20, ge=1, le=200, description="Number of recent messages"
+    )
+
+
+def _extract_token(req: Request) -> str:
+    header_token = req.headers.get("X-WhatsApp-API-Token", "")
+    if header_token:
+        return header_token
+    auth = req.headers.get("Authorization", "")
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return req.cookies.get(WHATSAPP_QR_COOKIE, "")
+
+
+def _purge_qr_sessions() -> None:
+    now = time.time()
+    expired = [token for token, expires_at in _qr_sessions.items() if expires_at <= now]
+    for token in expired:
+        _qr_sessions.pop(token, None)
+
+
+def _is_valid_qr_session(token: str) -> bool:
+    _purge_qr_sessions()
+    return bool(token and _qr_sessions.get(token, 0) > time.time())
+
+
+def _require_api_auth(req: Request, *, allow_qr_session: bool = False) -> None:
+    provided = _extract_token(req)
+    if provided == API_TOKEN:
+        return
+    if allow_qr_session and _is_valid_qr_session(provided):
+        return
+    if provided != API_TOKEN:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _bridge_headers() -> dict[str, str] | None:
+    return {"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN}
+
+
+def _raise_bridge_error(exc: Exception) -> None:
+    if isinstance(exc, httpx.TimeoutException):
+        raise HTTPException(
+            status_code=504, detail="WhatsApp bridge timed out."
+        ) from exc
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        body = exc.response.text
+        if status == 503:
+            raise HTTPException(
+                status_code=503,
+                detail="WhatsApp not connected. Scan QR code first.",
+            ) from exc
+        if status == 401:
+            raise HTTPException(
+                status_code=502, detail="Bridge token rejected."
+            ) from exc
+        raise HTTPException(
+            status_code=502, detail=f"Bridge error ({status}): {body}"
+        ) from exc
+    if isinstance(exc, httpx.HTTPError):
+        raise HTTPException(
+            status_code=502, detail=f"Bridge request failed: {exc}"
+        ) from exc
+    raise HTTPException(status_code=500, detail=f"Unexpected error: {exc}") from exc
+
+
+async def _bridge_request(
+    req: Request,
+    method: str,
+    path: str,
+    *,
+    json_body: dict[str, Any] | None = None,
+    timeout_seconds: float | None = None,
+) -> httpx.Response:
+    client: httpx.AsyncClient = req.app.state.bridge_client
+    url = f"{BRIDGE_URL}{path}"
+    kwargs: dict[str, Any] = {
+        "method": method,
+        "url": url,
+        "headers": _bridge_headers(),
+        "json": json_body,
+    }
+    if timeout_seconds is not None:
+        kwargs["timeout"] = timeout_seconds
+
+    last_error: Exception | None = None
+    for _ in range(2):
+        try:
+            response = await client.request(**kwargs)
+            response.raise_for_status()
+            return response
+        except (httpx.TimeoutException, httpx.HTTPStatusError, httpx.HTTPError) as exc:
+            last_error = exc
+            if (
+                isinstance(exc, httpx.HTTPStatusError)
+                and exc.response.status_code < 500
+            ):
+                break
+
+    assert last_error is not None
+    _raise_bridge_error(last_error)
+    raise HTTPException(status_code=500, detail="Unreachable")
+
+
+@app.get("/health")
+async def health() -> dict[str, Any]:
+    return {"status": "healthy", "service": "whatsapp-api", "version": "0.2.0"}
 
 
 @app.get("/status")
 async def status(req: Request):
     """Check WhatsApp connection status and QR code availability."""
-    _require_api_auth(req)
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(
-            f"{BRIDGE_URL}/status",
-            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
-        )
-        resp.raise_for_status()
-        return resp.json()
+    _require_api_auth(req, allow_qr_session=True)
+    response = await _bridge_request(req, "GET", "/status", timeout_seconds=10.0)
+    return response.json()
 
 
 @app.get("/qr")
 async def get_qr(req: Request):
-    """Get QR code for WhatsApp authentication. Returns PNG image or status JSON."""
-    _require_api_auth(req)
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            f"{BRIDGE_URL}/qr",
-            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
+    """Get QR code for WhatsApp authentication."""
+    _require_api_auth(req, allow_qr_session=True)
+    response = await _bridge_request(req, "GET", "/qr", timeout_seconds=60.0)
+    content_type = response.headers.get("content-type", "")
+    if "image/" in content_type:
+        return Response(
+            content=response.content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
         )
-        resp.raise_for_status()
-        # Check if response is JSON (status) or image (QR code)
-        content_type = resp.headers.get("content-type", "")
-        if "image" in content_type:
-            from fastapi.responses import Response
-            return Response(content=resp.content, media_type=content_type)
-        return resp.json()
+    return response.json()
+
+
+@app.post("/qr_session")
+async def create_qr_session(req: Request):
+    _require_api_auth(req)
+    token = secrets.token_urlsafe(24)
+    expires_at = time.time() + QR_SESSION_TTL_SECONDS
+    _qr_sessions[token] = expires_at
+    response = JSONResponse(
+        {
+            "expires_at": int(expires_at),
+            "modal_url": "/qr_modal",
+        }
+    )
+    max_age = max(0, int(expires_at - time.time()))
+    response.set_cookie(
+        WHATSAPP_QR_COOKIE,
+        token,
+        max_age=max_age,
+        httponly=True,
+        secure=False,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.get("/qr_modal", response_class=HTMLResponse)
+async def qr_modal(req: Request):
+    _require_api_auth(req, allow_qr_session=True)
+    html = """
+<!DOCTYPE html>
+<html lang=\"en\">
+  <head>
+    <meta charset=\"utf-8\" />
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <title>WhatsApp QR</title>
+    <style>
+      body {{ font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; background: #0b0f12; color: #f5f6f7; }}
+      .card {{ background: #141a1f; border-radius: 16px; padding: 20px; max-width: 420px; margin: 0 auto; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }}
+      h1 {{ font-size: 20px; margin: 0 0 12px; }}
+      p {{ margin: 0 0 16px; color: #b8c0c8; }}
+      img {{ width: 100%; border-radius: 12px; background: #0f1418; }}
+      .status {{ margin-top: 12px; font-size: 14px; color: #8fd19e; }}
+      .error {{ color: #ffb3b3; }}
+    </style>
+  </head>
+  <body>
+    <div class=\"card\">
+      <h1>Scan WhatsApp QR</h1>
+      <p>Open WhatsApp on your phone and scan this code to connect.</p>
+      <img id=\"qr\" alt=\"WhatsApp QR code\" />
+      <div id=\"status\" class=\"status\">Loading QR…</div>
+    </div>
+    <script>
+      const statusEl = document.getElementById('status');
+      const qrEl = document.getElementById('qr');
+
+      async function fetchQr() {{
+        const response = await fetch('/qr', {
+          credentials: 'include'
+        });
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('image/')) {{
+          const blob = await response.blob();
+          qrEl.src = URL.createObjectURL(blob);
+          statusEl.textContent = 'Waiting for scan…';
+          statusEl.classList.remove('error');
+          return;
+        }}
+        const data = await response.json();
+        statusEl.textContent = data.message || 'Waiting for QR…';
+        statusEl.classList.remove('error');
+      }}
+
+      async function pollStatus() {{
+        const response = await fetch('/status', {
+          credentials: 'include'
+        });
+        const data = await response.json();
+        if (data.connected) {{
+          statusEl.textContent = 'Connected! You can close this window.';
+          return true;
+        }}
+        return false;
+      }}
+
+      async function loop() {{
+        try {{
+          await fetchQr();
+          const connected = await pollStatus();
+          if (connected) return;
+          setTimeout(loop, 4000);
+        }} catch (err) {{
+          statusEl.textContent = 'Unable to load QR. Please refresh.';
+          statusEl.classList.add('error');
+        }}
+      }}
+
+      loop();
+    </script>
+  </body>
+</html>
+"""
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
 
 
 @app.post("/start")
 async def start_client(req: Request):
     """Manually start the WhatsApp client initialization."""
     _require_api_auth(req)
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(
-            f"{BRIDGE_URL}/start",
-            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
-        )
-        resp.raise_for_status()
-        return resp.json()
+    response = await _bridge_request(req, "POST", "/start", timeout_seconds=10.0)
+    return response.json()
 
 
 @app.post("/send_message")
 async def send_message(req: Request, body: SendMessageRequest):
-    """Send a WhatsApp message to a phone number."""
+    """Send a WhatsApp message to a phone number or group."""
     _require_api_auth(req)
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{BRIDGE_URL}/send",
-            json={"to": body.to, "message": body.message},
-            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
-        )
-        if resp.status_code == 503:
-            raise HTTPException(503, "WhatsApp not connected. Scan QR code first.")
-        resp.raise_for_status()
-        return resp.json()
+    response = await _bridge_request(
+        req,
+        "POST",
+        "/send",
+        json_body={"to": body.to, "message": body.message},
+        timeout_seconds=30.0,
+    )
+    return response.json()
 
 
 @app.post("/get_messages")
 async def get_messages(req: Request, body: GetMessagesRequest):
     """Get recent messages from a WhatsApp chat."""
     _require_api_auth(req)
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            f"{BRIDGE_URL}/messages",
-            json={"chat_id": body.chat_id, "limit": body.limit},
-            headers={"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN} if BRIDGE_TOKEN else None,
-        )
-        if resp.status_code == 503:
-            raise HTTPException(503, "WhatsApp not connected. Scan QR code first.")
-        resp.raise_for_status()
-        return resp.json()
+    response = await _bridge_request(
+        req,
+        "POST",
+        "/messages",
+        json_body={"chat_id": body.chat_id, "limit": body.limit},
+        timeout_seconds=30.0,
+    )
+    return response.json()

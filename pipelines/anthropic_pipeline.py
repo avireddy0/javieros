@@ -7,12 +7,11 @@ are now native External Tools in Open WebUI.
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
 from pathlib import Path
-from typing import Iterator, Union
+from typing import Any, Iterator, Union
 
 from pydantic import BaseModel, Field
 
@@ -20,9 +19,18 @@ _pipelines_dir = str(Path(__file__).resolve().parent)
 if _pipelines_dir not in sys.path:
     sys.path.insert(0, _pipelines_dir)
 
+from common import split_system_and_messages
+from openwebui_api import OpenWebUIAPIError, openwebui_chat_completion
 from tools import whatsapp
 
 logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 SYSTEM_PROMPT = """You are Javier Barrios's personal AI assistant. Javier is the Head of Real Estate Development at Flow. He is also CEO and Co-founder of MIRA, a real estate investment and development platform. You are fully bilingual in English and Spanish — respond in whichever language the user writes in, and translate seamlessly when asked.
 
@@ -79,6 +87,22 @@ def _anthropic_tools() -> list[dict]:
 class Pipeline:
     class Valves(BaseModel):
         ANTHROPIC_API_KEY: str = Field(default="", description="Anthropic API key")
+        USE_OPENWEBUI_API: bool = Field(
+            default=_env_bool("ANTHROPIC_USE_OPENWEBUI_API", False),
+            description="Route requests through Open WebUI API instead of direct Anthropic SDK",
+        )
+        OPENWEBUI_API_BASE_URL: str = Field(
+            default=os.getenv("OPENWEBUI_API_BASE_URL", "http://localhost:8080"),
+            description="Open WebUI base URL",
+        )
+        OPENWEBUI_API_KEY: str = Field(
+            default=os.getenv("OPENWEBUI_API_KEY", ""),
+            description="Open WebUI API key",
+        )
+        OPENWEBUI_MODEL_ID: str = Field(
+            default=os.getenv("OPENWEBUI_ANTHROPIC_MODEL_ID", ""),
+            description="Optional Open WebUI model ID override",
+        )
 
     def __init__(self):
         self.type = "manifold"
@@ -93,6 +117,27 @@ class Pipeline:
         ]
 
     def pipe(self, body: dict, __user__: dict | None = None, **kwargs) -> Union[str, Iterator[str]]:
+        model_id = body.get("model", "claude-opus-4-5-20251101")
+        if "." in model_id:
+            model_id = model_id.split(".", 1)[1]
+
+        system_message, messages = split_system_and_messages(
+            body.get("messages", []),
+            SYSTEM_PROMPT,
+        )
+
+        if self._should_use_openwebui_api():
+            try:
+                return self._call_openwebui_api(
+                    model_id=model_id,
+                    body=body,
+                    system_message=system_message,
+                    messages=messages,
+                    user=__user__ or {},
+                )
+            except OpenWebUIAPIError as exc:
+                logger.warning("Open WebUI API fallback to Anthropic SDK: %s", exc)
+
         try:
             import anthropic
         except ImportError:
@@ -106,20 +151,53 @@ class Pipeline:
             timeout=300.0,
         )
 
-        model_id = "claude-opus-4-5-20251101"
         user_email = (__user__ or {}).get("email")
-
-        messages = []
-        system_message = SYSTEM_PROMPT
-        for msg in body.get("messages", []):
-            if msg["role"] == "system":
-                system_message = msg["content"] + "\n\n" + SYSTEM_PROMPT
-            else:
-                messages.append({"role": msg["role"], "content": msg["content"]})
 
         return self._agentic_loop(client, model_id, messages, system_message, user_email=user_email)
 
-    def _agentic_loop(self, client, model_id, messages, system_message, user_email: str | None = None):
+    def _should_use_openwebui_api(self) -> bool:
+        return (
+            self.valves.USE_OPENWEBUI_API
+            and bool(self.valves.OPENWEBUI_API_BASE_URL)
+            and bool(self.valves.OPENWEBUI_API_KEY)
+        )
+
+    def _call_openwebui_api(
+        self,
+        *,
+        model_id: str,
+        body: dict[str, Any],
+        system_message: str,
+        messages: list[dict[str, str]],
+        user: dict[str, Any],
+    ) -> str:
+        openwebui_model = self.valves.OPENWEBUI_MODEL_ID or model_id
+        payload = {
+            "model": openwebui_model,
+            "messages": [
+                {"role": "system", "content": system_message},
+                *messages,
+            ],
+            "temperature": body.get("temperature", 0.7),
+            "max_tokens": body.get("max_tokens", 4096),
+            "stream": False,
+        }
+        return openwebui_chat_completion(
+            base_url=self.valves.OPENWEBUI_API_BASE_URL,
+            payload=payload,
+            api_key=self.valves.OPENWEBUI_API_KEY,
+            user=user,
+            timeout=120.0,
+        )
+
+    def _agentic_loop(
+        self,
+        client,
+        model_id: str,
+        messages: list[dict[str, Any]],
+        system_message: str,
+        user_email: str | None = None,
+    ):
         """Run Claude with tool use in a loop until it produces a final text response."""
         import anthropic
 
@@ -131,17 +209,28 @@ class Pipeline:
         try:
             for _round in range(MAX_TOOL_ROUNDS):
                 # Non-streaming call so we can inspect tool_use blocks
-                response = client.messages.create(
-                    model=model_id,
-                    messages=messages,
-                    max_tokens=16384,
-                    system=system_message,
-                    tools=tools,
-                    thinking={
-                        "type": "enabled",
-                        "budget_tokens": 10000,
-                    },
-                )
+                response = None
+                for attempt in range(2):
+                    try:
+                        response = client.messages.create(
+                            model=model_id,
+                            messages=messages,
+                            max_tokens=16384,
+                            system=system_message,
+                            tools=tools,
+                            thinking={
+                                "type": "enabled",
+                                "budget_tokens": 10000,
+                            },
+                        )
+                        break
+                    except anthropic.APIError as exc:
+                        status = getattr(exc, "status_code", 500)
+                        if attempt == 1 or (status is not None and status < 500):
+                            raise
+                if response is None:
+                    yield "Error: No response from Anthropic."
+                    return
 
                 # Collect text to yield and tool calls to execute
                 text_parts = []
@@ -186,7 +275,7 @@ class Pipeline:
                         {
                             "type": "tool_result",
                             "tool_use_id": tc.id,
-                            "content": result_text,
+                            "content": str(result_text),
                         }
                     )
 
@@ -199,7 +288,8 @@ class Pipeline:
         except anthropic.RateLimitError:
             yield "Error: Rate limit exceeded. Please try again."
         except anthropic.APIError as e:
-            yield f"Error: Anthropic API error — {e.message}"
+            message = getattr(e, "message", str(e))
+            yield f"Error: Anthropic API error — {message}"
         except Exception as e:
             logger.exception("Pipeline error")
             yield f"Error: {e}"

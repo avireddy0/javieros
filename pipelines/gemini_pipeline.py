@@ -5,18 +5,32 @@ Uses Gemini 3 Pro Preview and Flash Preview via Vertex AI
 with Envision's service account credentials.
 """
 
-import json
+import logging
 import os
 import sys
 from pathlib import Path
-from typing import Iterator, Union
+from typing import Any, Iterator, Union
 
+import httpx
+import google.auth
+import google.auth.transport.requests
 from pydantic import BaseModel, Field
 
 _pipelines_dir = str(Path(__file__).resolve().parent)
 if _pipelines_dir not in sys.path:
     sys.path.insert(0, _pipelines_dir)
 
+from common import split_system_and_messages
+from openwebui_api import OpenWebUIAPIError, openwebui_chat_completion
+
+logger = logging.getLogger(__name__)
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 SYSTEM_PROMPT = """You are Javier Barrios's personal AI assistant. Javier is the Head of Real Estate Development at Flow. He is also CEO and Co-founder of MIRA, a real estate investment and development platform. You are fully bilingual in English and Spanish — respond in whichever language the user writes in, and translate seamlessly when asked.
 
@@ -60,6 +74,22 @@ class Pipeline:
             default="flow-os-1769675656", description="GCP Project ID"
         )
         GCP_LOCATION: str = Field(default="global", description="GCP region")
+        USE_OPENWEBUI_API: bool = Field(
+            default=_env_bool("GEMINI_USE_OPENWEBUI_API", True),
+            description="Route requests through Open WebUI API when credentials are provided",
+        )
+        OPENWEBUI_API_BASE_URL: str = Field(
+            default=os.getenv("OPENWEBUI_API_BASE_URL", "http://localhost:8080"),
+            description="Open WebUI base URL",
+        )
+        OPENWEBUI_API_KEY: str = Field(
+            default=os.getenv("OPENWEBUI_API_KEY", ""),
+            description="Open WebUI API key",
+        )
+        OPENWEBUI_MODEL_ID: str = Field(
+            default=os.getenv("OPENWEBUI_GEMINI_MODEL_ID", ""),
+            description="Optional Open WebUI model ID override",
+        )
 
     def __init__(self):
         self.type = "manifold"
@@ -73,28 +103,81 @@ class Pipeline:
         ]
 
     def pipe(self, body: dict, __user__: dict | None = None, **kwargs) -> Union[str, Iterator[str]]:
-        import httpx
-        import google.auth
-        import google.auth.transport.requests
-
-        model_id = body["model"]
+        model_id = body.get("model", "gemini-3-pro-preview")
         if "." in model_id:
             model_id = model_id.split(".", 1)[1]
 
-        messages = body.get("messages", [])
+        system_instruction, normalized_messages = split_system_and_messages(
+            body.get("messages", []), SYSTEM_PROMPT
+        )
 
-        # Build Gemini content format
-        system_instruction = SYSTEM_PROMPT
+        if self._should_use_openwebui_api():
+            try:
+                return self._call_openwebui_api(
+                    model_id=model_id,
+                    body=body,
+                    system_instruction=system_instruction,
+                    messages=normalized_messages,
+                    user=__user__ or {},
+                )
+            except OpenWebUIAPIError as exc:
+                # Fall back to direct Vertex path if Open WebUI proxy is unavailable.
+                logger.warning("Open WebUI API fallback to Vertex: %s", exc)
+
+        return self._call_vertex_api(
+            model_id=model_id,
+            body=body,
+            system_instruction=system_instruction,
+            messages=normalized_messages,
+        )
+
+    def _should_use_openwebui_api(self) -> bool:
+        return (
+            self.valves.USE_OPENWEBUI_API
+            and bool(self.valves.OPENWEBUI_API_BASE_URL)
+            and bool(self.valves.OPENWEBUI_API_KEY)
+        )
+
+    def _call_openwebui_api(
+        self,
+        *,
+        model_id: str,
+        body: dict[str, Any],
+        system_instruction: str,
+        messages: list[dict[str, str]],
+        user: dict[str, Any],
+    ) -> str:
+        openwebui_model = self.valves.OPENWEBUI_MODEL_ID or model_id
+        payload = {
+            "model": openwebui_model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                *messages,
+            ],
+            "temperature": body.get("temperature", 1.0),
+            "max_tokens": body.get("max_tokens", 8192),
+            "stream": False,
+        }
+        return openwebui_chat_completion(
+            base_url=self.valves.OPENWEBUI_API_BASE_URL,
+            payload=payload,
+            api_key=self.valves.OPENWEBUI_API_KEY,
+            user=user,
+            timeout=120.0,
+        )
+
+    def _call_vertex_api(
+        self,
+        *,
+        model_id: str,
+        body: dict[str, Any],
+        system_instruction: str,
+        messages: list[dict[str, str]],
+    ) -> str:
         contents = []
         for msg in messages:
-            role = msg["role"]
-            text = msg["content"]
-            if role == "system":
-                system_instruction = text + "\n\n" + SYSTEM_PROMPT
-            elif role == "user":
-                contents.append({"role": "user", "parts": [{"text": text}]})
-            elif role == "assistant":
-                contents.append({"role": "model", "parts": [{"text": text}]})
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
 
         try:
             creds, _ = google.auth.default()
@@ -122,14 +205,28 @@ class Pipeline:
                 },
             }
 
-            resp = httpx.post(
-                url,
-                json=payload,
-                headers={"Authorization": f"Bearer {creds.token}"},
-                timeout=120.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            with httpx.Client(timeout=120.0) as client:
+                response = None
+                for _ in range(2):
+                    response = client.post(
+                        url,
+                        json=payload,
+                        headers={"Authorization": f"Bearer {creds.token}"},
+                    )
+                    if response.status_code < 500:
+                        break
+                assert response is not None
+                response.raise_for_status()
+
+            data = response.json()
+            candidate = (data.get("candidates") or [{}])[0]
+            parts = ((candidate.get("content") or {}).get("parts") or [])
+            text = "\n".join(
+                part.get("text", "") for part in parts if isinstance(part, dict)
+            ).strip()
+            if text:
+                return text
+            finish_reason = candidate.get("finishReason", "unknown")
+            return f"No text response returned by Gemini (finish reason: {finish_reason})."
         except Exception as e:
             return f"Error: Gemini API error — {e}"

@@ -9,14 +9,12 @@ The WhatsApp API server is deployed as a sidecar container in the `open-webui` C
 ```
 open-webui Cloud Run Service (port 8080)
 ├── open-webui (main container)
-├── pipelines (sidecar, port 9099)
-├── whatsapp-bridge (sidecar, port 3000) - whatsapp-web.js session
+├── whatsapp-bridge (sidecar, port 3000) - Baileys session service
 └── whatsapp-api (sidecar, port 8000) - OpenAPI wrapper
 ```
 
 All containers share `localhost` networking, so:
 - whatsapp-api connects to whatsapp-bridge at `http://localhost:3000`
-- pipelines connects to whatsapp-bridge at `http://localhost:3000`
 
 ## Deployment
 
@@ -25,7 +23,7 @@ All containers share `localhost` networking, so:
 ```bash
 cd /Users/avireddy/GitHub/javieros/servers/whatsapp
 gcloud builds submit \
-  --tag us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:v1 \
+  --tag us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:v2 \
   --project=flow-os-1769675656
 ```
 
@@ -40,7 +38,7 @@ gcloud run services replace service.yaml \
 
 ## Current Status
 
-**Image**: `us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:v1`
+**Image**: `us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:v2`
 **Service**: `open-webui` in `flow-os-1769675656` (us-central1)
 **Container**: `whatsapp-api` (sidecar)
 **Internal Port**: 8000
@@ -52,21 +50,17 @@ The whatsapp-api is NOT directly accessible from outside Cloud Run because:
 1. Cloud Run only exposes ONE port (8080) per service
 2. Port 8080 is mapped to the `open-webui` container
 
-### Option 1: Route via pipelines (RECOMMENDED)
-
-Add a reverse proxy route in the pipelines container to forward `/whatsapp/*` requests to `http://localhost:8000`.
-
-### Option 2: Deploy separate Cloud Run service
+### Option 1: Deploy separate Cloud Run service
 
 Deploy whatsapp-api + whatsapp-bridge as a separate service with its own URL. However, this would duplicate the WhatsApp session.
 
-### Option 3: Open WebUI Tools Import
+### Option 2: Open WebUI global tools (current architecture)
 
 Open WebUI can import OpenAPI tools from internal URLs. The whatsapp-api provides OpenAPI at:
 - `http://localhost:8000/openapi.json`
 - `http://localhost:8000/docs` (Swagger UI)
 
-Since Open WebUI runs in the same service, it should be able to import from `http://localhost:8000`.
+Since Open WebUI runs in the same service, global tool connections can safely target `http://localhost:8000`.
 
 ## API Endpoints
 
@@ -87,6 +81,8 @@ Since Open WebUI runs in the same service, it should be able to import from `htt
     "limit": 20
   }
   ```
+- `POST /qr_session` - Create a short-lived QR modal session
+- `GET /qr_modal?token=...` - Embedded QR modal page (polls `/qr` + `/status`)
 
 ## Environment Variables
 
@@ -94,6 +90,8 @@ Since Open WebUI runs in the same service, it should be able to import from `htt
 |----------|-------|--------|
 | `WHATSAPP_BRIDGE_URL` | `http://localhost:3000` | Direct |
 | `WHATSAPP_BRIDGE_TOKEN` | (secret) | Secret `whatsapp-bridge-token` |
+| `WHATSAPP_API_TOKEN` | (secret) | Secret `whatsapp-bridge-token` |
+| `WHATSAPP_ALLOWED_ORIGINS` | Open WebUI HTTPS URL | Direct |
 
 ## Verification
 
@@ -111,16 +109,6 @@ gcloud logging read \
   --limit=20
 ```
 
-## Next Steps
+## Recommended setup
 
-To make the API externally accessible:
-
-1. **Add reverse proxy in pipelines**:
-   - Update `servers/pipelines/main.py` to add `/whatsapp/*` route
-   - Forward to `http://localhost:8000`
-   - External access: `https://open-webui-210087613384.us-central1.run.app/whatsapp/*`
-
-2. **OR import in Open WebUI**:
-   - Navigate to Open WebUI → Tools → Import
-   - Use internal URL: `http://localhost:8000/openapi.json`
-   - Tools will be available to all users
+Use Open WebUI global tool connections (`TOOL_SERVER_CONNECTIONS`) to expose WhatsApp endpoints without publishing port 8000 externally.

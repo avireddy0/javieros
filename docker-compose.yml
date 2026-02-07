@@ -7,9 +7,39 @@ services:
       - DATABASE_URL=postgresql://openwebui:openwebui@db:5432/openwebui
       - WEBUI_SECRET_KEY=dev-secret-key
       - WEBUI_AUTH=true
+      - WEBUI_ADMIN_EMAIL=${WEBUI_ADMIN_EMAIL:-jabarrios@flow.life}
+      - WEBUI_ADMIN_NAME=${WEBUI_ADMIN_NAME:-Javier Barrios}
+      - WEBUI_ADMIN_PASSWORD=${WEBUI_ADMIN_PASSWORD:-change-me-before-production}
+      - ENABLE_SIGNUP=false
       - ENABLE_OPENAI_API=true
+      - OPENAI_API_BASE_URL=https://api.openai.com/v1
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WHATSAPP_API_TOKEN=${WHATSAPP_API_TOKEN}
+      - WHATSAPP_API_BASE_URL=http://whatsapp-api:8000
+      - WHATSAPP_QR_COOKIE_SECURE=false
       - ENABLE_OLLAMA_API=false
-      # Native Anthropic — no pipelines proxy needed
+      - ENABLE_FORWARD_USER_INFO_HEADERS=false
+      - WEBUI_URL=http://localhost:8080
+      - CORS_ALLOW_ORIGIN=http://localhost:8080;http://127.0.0.1:8080
+      - DEFAULT_MODELS=gpt-5.2-chat-latest
+      - TASK_MODEL=gpt-5.2-chat-latest
+      - TASK_MODEL_EXTERNAL=gpt-5.2-chat-latest
+      - DEFAULT_LOCALE=en
+      - ENABLE_PERSISTENT_CONFIG=true
+      - ENABLE_OAUTH_PERSISTENT_CONFIG=true
+      - WEBUI_SESSION_COOKIE_SAME_SITE=lax
+      - WEBUI_AUTH_COOKIE_SAME_SITE=lax
+      - ENABLE_BASE_MODELS_CACHE=true
+      - MODELS_CACHE_TTL=300
+      - THREAD_POOL_SIZE=128
+      - ENABLE_DIRECT_CONNECTIONS=true
+      - ENABLE_WEB_SEARCH=true
+      - WEB_SEARCH_ENGINE=duckduckgo
+      - WEB_SEARCH_RESULT_COUNT=5
+      - WEB_SEARCH_CONCURRENT_REQUESTS=2
+      - WEB_LOADER_CONCURRENT_REQUESTS=5
+      - TOOL_SERVER_CONNECTIONS=[{"type":"mcp","url":"https://envision-mcp-845049957105.us-central1.run.app","path":"/mcp","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"envision-mcp","name":"Envision MCP","description":"Construction intelligence and project systems via MCP (streamable HTTP)."}},{"type":"mcp","url":"https://slack-mcp-a4bmliuj7q-uc.a.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"openapi","url":"http://whatsapp-api:8000","path":"/openapi.json","spec_type":"url","spec":"","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp","name":"WhatsApp Tools","description":"WhatsApp messaging and session controls for assistant workflows."}}]
+      # Optional native Anthropic support
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       - db
@@ -26,7 +56,7 @@ services:
       - "5432:5432"
 
   # ── WhatsApp ────────────────────────────────────────────────
-  # whatsapp-bridge: headless Chrome + whatsapp-web.js (QR auth)
+  # whatsapp-bridge: Baileys session service (QR auth)
   # whatsapp-api:   FastAPI wrapper registered as OpenAPI tool server
 
   whatsapp-bridge:
@@ -47,6 +77,7 @@ services:
       - WHATSAPP_BRIDGE_URL=http://whatsapp-bridge:3000
       - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN}
       - WHATSAPP_API_TOKEN=${WHATSAPP_API_TOKEN}
+      - WHATSAPP_ALLOWED_ORIGINS=http://localhost:8080
     depends_on:
       - whatsapp-bridge
     restart: unless-stopped
