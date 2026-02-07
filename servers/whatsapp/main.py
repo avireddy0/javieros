@@ -21,11 +21,15 @@ WHATSAPP_QR_COOKIE = "whatsapp_qr_session"
 QR_SESSION_TTL_SECONDS = int(os.getenv("WHATSAPP_QR_SESSION_TTL_SECONDS", "120"))
 _qr_sessions: dict[str, float] = {}
 
+import logging
+
+_log = logging.getLogger("whatsapp-api")
+
 if not BRIDGE_TOKEN:
-    raise RuntimeError("WHATSAPP_BRIDGE_TOKEN is required")
+    _log.warning("WHATSAPP_BRIDGE_TOKEN not set — API endpoints will return 503")
 
 if not API_TOKEN:
-    raise RuntimeError("WHATSAPP_API_TOKEN is required")
+    _log.warning("WHATSAPP_API_TOKEN not set — API endpoints will return 503")
 
 _origins = [
     o.strip()
