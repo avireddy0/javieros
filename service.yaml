@@ -109,7 +109,7 @@ spec:
               port: 8080
             periodSeconds: 30
         - name: pipelines
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:v3
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/pipelines:latest
           resources:
             limits:
               cpu: "1"
@@ -157,13 +157,13 @@ spec:
               mountPath: /data/whatsapp-session
           startupProbe:
             httpGet:
-              path: /status
+              path: /health
               port: 3000
             initialDelaySeconds: 10
             periodSeconds: 5
             failureThreshold: 30
         - name: whatsapp-api
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:v1
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-api:latest
           resources:
             limits:
               cpu: "0.25"
@@ -176,9 +176,14 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: whatsapp-bridge-token
+            - name: WHATSAPP_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: whatsapp-api-token
           startupProbe:
             httpGet:
-              path: /status
+              path: /health
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 5
