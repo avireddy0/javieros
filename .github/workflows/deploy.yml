@@ -40,6 +40,14 @@ jobs:
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-bridge:latest
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-api:latest
 
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPO }}/open-webui:latest'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+
       - name: Deploy
         run: |
           # Force new revision by adding a unique annotation (gcloud run services replace

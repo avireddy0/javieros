@@ -12,7 +12,7 @@ Baileys-based Node bridge that maintains WhatsApp session state and message hist
 
 ## CONVENTIONS
 - Session data stored under `/data/whatsapp-session`.
-- Auth required unless `WHATSAPP_ALLOW_INSECURE=true`.
+- Auth always required via `WHATSAPP_BRIDGE_TOKEN`.
 
 ## ANTI-PATTERNS
 - Do not run multiple bridge instances against the same session store.

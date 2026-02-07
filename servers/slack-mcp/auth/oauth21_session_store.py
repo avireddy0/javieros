@@ -8,6 +8,7 @@ authorization code flow, and token storage.
 
 import contextvars
 import logging
+import hmac
 import json
 import hashlib
 import secrets
@@ -124,7 +125,7 @@ def extract_session_from_headers(headers: Dict[str, str]) -> Optional[str]:
             # Look for a session that has this access token
             store = get_oauth21_session_store()
             for session_key, session_info in store._sessions.items():
-                if session_info.get("access_token") == token:
+                if hmac.compare_digest(session_info.get("access_token", ""), token):
                     return session_info.get("session_id") or f"bearer_{session_key}"
 
         # If no session found, create a temporary session ID from token hash
@@ -524,7 +525,9 @@ class OAuth21SessionStore:
                 logger.debug(f"No user mapping found for MCP session {mcp_session_id}")
                 return None
 
-            logger.debug(f"Found session {session_key} for MCP session {mcp_session_id}")
+            logger.debug(
+                f"Found session {session_key} for MCP session {mcp_session_id}"
+            )
             return self._sessions.get(session_key)
 
     def remove_session(self, user_id: str, team_id: str):

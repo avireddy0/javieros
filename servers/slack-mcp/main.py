@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 from importlib import metadata
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode, urlparse, parse_qs
+import hmac
 
 from dotenv import load_dotenv
 from fastapi import HTTPException, Request
@@ -48,8 +49,7 @@ from auth.oauth21_session_store import get_oauth21_session_store
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,7 @@ SLACK_SCOPES = [
 # Dynamic Client Registration Store
 # =============================================================================
 
+
 class DynamicClientStore:
     """In-memory store for dynamically registered OAuth clients."""
 
@@ -112,7 +113,8 @@ class DynamicClientStore:
             "redirect_uris": redirect_uris,
             "grant_types": grant_types or ["authorization_code", "refresh_token"],
             "response_types": response_types or ["code"],
-            "token_endpoint_auth_method": token_endpoint_auth_method or "client_secret_post",
+            "token_endpoint_auth_method": token_endpoint_auth_method
+            or "client_secret_post",
             "scope": scope or " ".join(SLACK_SCOPES),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -138,7 +140,7 @@ class DynamicClientStore:
 
         # Validate client secret if provided
         if client_secret is not None:
-            if client["client_secret"] != client_secret:
+            if not hmac.compare_digest(client["client_secret"], client_secret):
                 return False
 
         # Validate redirect URI if provided
@@ -165,6 +167,7 @@ def get_dynamic_client_store() -> DynamicClientStore:
 # =============================================================================
 # GCS Token Storage
 # =============================================================================
+
 
 class GCSTokenStore:
     """Store OAuth tokens in Google Cloud Storage."""
@@ -204,7 +207,7 @@ class GCSTokenStore:
         await asyncio.to_thread(
             blob.upload_from_string,
             json.dumps(token_data),
-            content_type="application/json"
+            content_type="application/json",
         )
         logger.info(f"Stored token for {user_id}@{team_id} in GCS")
 
@@ -249,6 +252,7 @@ def get_gcs_token_store() -> GCSTokenStore:
 # PKCE Helper Functions
 # =============================================================================
 
+
 def validate_pkce(code_verifier: str, code_challenge: str) -> bool:
     """
     Validate PKCE code_verifier against code_challenge.
@@ -270,6 +274,7 @@ def validate_pkce(code_verifier: str, code_challenge: str) -> bool:
 # OAuth 2.1 Endpoints
 # =============================================================================
 
+
 @server.custom_route("/.well-known/oauth-authorization-server", methods=["GET"])
 async def oauth_metadata(request: Request):
     """
@@ -289,7 +294,10 @@ async def oauth_metadata(request: Request):
         "response_types_supported": ["code"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "code_challenge_methods_supported": ["S256"],
-        "token_endpoint_auth_methods_supported": ["client_secret_post", "client_secret_basic"],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_post",
+            "client_secret_basic",
+        ],
     }
 
     return JSONResponse(metadata)
@@ -378,10 +386,15 @@ async def oauth2_authorize(request: Request):
 
     # OAuth 2.1 requires PKCE
     if not code_challenge or not code_challenge_method:
-        raise HTTPException(status_code=400, detail="PKCE required (code_challenge and code_challenge_method)")
+        raise HTTPException(
+            status_code=400,
+            detail="PKCE required (code_challenge and code_challenge_method)",
+        )
 
     if code_challenge_method != "S256":
-        raise HTTPException(status_code=400, detail="Only code_challenge_method=S256 supported")
+        raise HTTPException(
+            status_code=400, detail="Only code_challenge_method=S256 supported"
+        )
 
     # Validate client and redirect_uri
     client_store = get_dynamic_client_store()
@@ -490,7 +503,9 @@ async def oauth2_callback(request: Request):
         if not response.get("ok"):
             error_msg = response.get("error", "unknown_error")
             logger.error(f"Slack token exchange failed: {error_msg}")
-            raise HTTPException(status_code=500, detail=f"Slack token exchange failed: {error_msg}")
+            raise HTTPException(
+                status_code=500, detail=f"Slack token exchange failed: {error_msg}"
+            )
 
         # Extract token information
         access_token = response.get("access_token")
@@ -662,7 +677,7 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
     session_info = None
 
     for session_key, info in session_store._sessions.items():
-        if info.get("refresh_token") == refresh_token:
+        if hmac.compare_digest(info.get("refresh_token", ""), refresh_token):
             session_info = info
             break
 
@@ -712,6 +727,7 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
 # REST API Endpoints for Open WebUI External Tools
 # =============================================================================
 
+
 def _get_slack_client_from_token(request: Request) -> Optional[WebClient]:
     """Extract Slack client from Bearer token."""
     auth_header = request.headers.get("Authorization", "")
@@ -723,7 +739,7 @@ def _get_slack_client_from_token(request: Request) -> Optional[WebClient]:
 
     # Look up session by access token
     for session_key, session_info in session_store._sessions.items():
-        if session_info.get("access_token") == token:
+        if hmac.compare_digest(session_info.get("access_token", ""), token):
             slack_token = session_info.get("slack_access_token")
             if slack_token:
                 return WebClient(token=slack_token)
@@ -735,16 +751,24 @@ async def api_list_channels(request: Request):
     """REST API: List Slack channels."""
     client = _get_slack_client_from_token(request)
     if not client:
-        raise HTTPException(status_code=401, detail="Unauthorized - valid OAuth token required")
+        raise HTTPException(
+            status_code=401, detail="Unauthorized - valid OAuth token required"
+        )
 
     params = request.query_params
     types = params.get("types", "public_channel,private_channel")
     limit = int(params.get("limit", "100"))
 
     try:
-        result = client.conversations_list(types=types, limit=limit, exclude_archived=False)
+        result = client.conversations_list(
+            types=types, limit=limit, exclude_archived=False
+        )
         channels = [
-            {"id": ch["id"], "name": ch["name"], "is_private": ch.get("is_private", False)}
+            {
+                "id": ch["id"],
+                "name": ch["name"],
+                "is_private": ch.get("is_private", False),
+            }
             for ch in result["channels"]
         ]
         return JSONResponse({"ok": True, "channels": channels})
@@ -801,14 +825,18 @@ async def api_send_message(request: Request):
     thread_ts = body.get("thread_ts")
 
     if not channel or not text:
-        return JSONResponse({"ok": False, "error": "channel and text required"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "channel and text required"}, status_code=400
+        )
 
     try:
         kwargs = {"channel": channel, "text": text}
         if thread_ts:
             kwargs["thread_ts"] = thread_ts
         result = client.chat_postMessage(**kwargs)
-        return JSONResponse({"ok": True, "ts": result["ts"], "channel": result["channel"]})
+        return JSONResponse(
+            {"ok": True, "ts": result["ts"], "channel": result["channel"]}
+        )
     except SlackApiError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
@@ -824,15 +852,24 @@ async def api_search_messages(request: Request):
     count = int(request.query_params.get("count", "20"))
 
     if not query:
-        return JSONResponse({"ok": False, "error": "query parameter required"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "query parameter required"}, status_code=400
+        )
 
     try:
         result = client.search_messages(query=query, count=min(count, 100))
         messages = [
-            {"text": m["text"], "user": m.get("user"), "ts": m["ts"], "channel": m.get("channel", {}).get("name")}
+            {
+                "text": m["text"],
+                "user": m.get("user"),
+                "ts": m["ts"],
+                "channel": m.get("channel", {}).get("name"),
+            }
             for m in result["messages"]["matches"]
         ]
-        return JSONResponse({"ok": True, "messages": messages, "total": result["messages"]["total"]})
+        return JSONResponse(
+            {"ok": True, "messages": messages, "total": result["messages"]["total"]}
+        )
     except SlackApiError as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
@@ -850,7 +887,8 @@ async def api_list_users(request: Request):
         result = client.users_list(limit=limit)
         users = [
             {"id": u["id"], "name": u["name"], "real_name": u.get("real_name", "")}
-            for u in result["members"] if not u.get("deleted") and not u.get("is_bot")
+            for u in result["members"]
+            if not u.get("deleted") and not u.get("is_bot")
         ]
         return JSONResponse({"ok": True, "users": users})
     except SlackApiError as e:
@@ -877,6 +915,7 @@ async def api_get_user(request: Request):
 # OpenAPI Specification Endpoint
 # =============================================================================
 
+
 @server.custom_route("/openapi.json", methods=["GET"])
 async def openapi_spec(request: Request):
     """OpenAPI 3.1 specification for Open WebUI External Tools."""
@@ -891,7 +930,9 @@ async def openapi_spec(request: Request):
             "version": "1.0.0",
         },
         "servers": [{"url": base_url}],
-        "security": [{"oauth2": ["channels:read", "chat:write", "users:read", "search:read"]}],
+        "security": [
+            {"oauth2": ["channels:read", "chat:write", "users:read", "search:read"]}
+        ],
         "components": {
             "securitySchemes": {
                 "oauth2": {
@@ -919,8 +960,19 @@ async def openapi_spec(request: Request):
                     "summary": "List Slack channels",
                     "description": "List all channels in the workspace",
                     "parameters": [
-                        {"name": "types", "in": "query", "schema": {"type": "string", "default": "public_channel,private_channel"}},
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100}},
+                        {
+                            "name": "types",
+                            "in": "query",
+                            "schema": {
+                                "type": "string",
+                                "default": "public_channel,private_channel",
+                            },
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 100},
+                        },
                     ],
                     "responses": {"200": {"description": "List of channels"}},
                 }
@@ -929,7 +981,14 @@ async def openapi_spec(request: Request):
                 "get": {
                     "operationId": "getChannel",
                     "summary": "Get channel info",
-                    "parameters": [{"name": "channel_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "parameters": [
+                        {
+                            "name": "channel_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
                     "responses": {"200": {"description": "Channel details"}},
                 }
             },
@@ -938,8 +997,17 @@ async def openapi_spec(request: Request):
                     "operationId": "getChannelHistory",
                     "summary": "Get channel message history",
                     "parameters": [
-                        {"name": "channel_id", "in": "path", "required": True, "schema": {"type": "string"}},
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100}},
+                        {
+                            "name": "channel_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 100},
+                        },
                     ],
                     "responses": {"200": {"description": "Channel messages"}},
                 }
@@ -972,8 +1040,17 @@ async def openapi_spec(request: Request):
                     "operationId": "searchMessages",
                     "summary": "Search messages",
                     "parameters": [
-                        {"name": "query", "in": "query", "required": True, "schema": {"type": "string"}},
-                        {"name": "count", "in": "query", "schema": {"type": "integer", "default": 20}},
+                        {
+                            "name": "query",
+                            "in": "query",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "count",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 20},
+                        },
                     ],
                     "responses": {"200": {"description": "Search results"}},
                 }
@@ -983,7 +1060,11 @@ async def openapi_spec(request: Request):
                     "operationId": "listUsers",
                     "summary": "List workspace users",
                     "parameters": [
-                        {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100}},
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 100},
+                        },
                     ],
                     "responses": {"200": {"description": "List of users"}},
                 }
@@ -992,7 +1073,14 @@ async def openapi_spec(request: Request):
                 "get": {
                     "operationId": "getUser",
                     "summary": "Get user info",
-                    "parameters": [{"name": "user_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                    "parameters": [
+                        {
+                            "name": "user_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
                     "responses": {"200": {"description": "User details"}},
                 }
             },
@@ -1008,11 +1096,13 @@ async def health_check(request: Request):
         version = metadata.version("slack-mcp")
     except metadata.PackageNotFoundError:
         version = "dev"
-    return JSONResponse({
-        "status": "healthy",
-        "service": "slack-mcp",
-        "version": version,
-    })
+    return JSONResponse(
+        {
+            "status": "healthy",
+            "service": "slack-mcp",
+            "version": version,
+        }
+    )
 
 
 @server.custom_route("/", methods=["GET"])
@@ -1026,22 +1116,25 @@ async def root(request: Request):
     config = get_oauth_config()
     base_url = config.get_oauth_base_url()
 
-    return JSONResponse({
-        "service": "slack-mcp",
-        "version": version,
-        "oauth2": {
-            "metadata": f"{base_url}/.well-known/oauth-authorization-server",
-            "register": f"{base_url}/register",
-            "authorize": f"{base_url}/oauth2/authorize",
-            "token": f"{base_url}/oauth2/token",
-        },
-        "mcp_endpoint": f"{base_url}/mcp",
-    })
+    return JSONResponse(
+        {
+            "service": "slack-mcp",
+            "version": version,
+            "oauth2": {
+                "metadata": f"{base_url}/.well-known/oauth-authorization-server",
+                "register": f"{base_url}/register",
+                "authorize": f"{base_url}/oauth2/authorize",
+                "token": f"{base_url}/oauth2/token",
+            },
+            "mcp_endpoint": f"{base_url}/mcp",
+        }
+    )
 
 
 # =============================================================================
 # Main Entry Point
 # =============================================================================
+
 
 def main() -> None:
     """Main entry point for the Slack MCP server."""
@@ -1061,7 +1154,9 @@ def main() -> None:
     safe_print(f"   📦 Version: {version}")
     safe_print(f"   🌐 Transport: streamable-http")
     safe_print(f"   🔗 URL: {base_url}")
-    safe_print(f"   🔐 OAuth Metadata: {base_url}/.well-known/oauth-authorization-server")
+    safe_print(
+        f"   🔐 OAuth Metadata: {base_url}/.well-known/oauth-authorization-server"
+    )
     safe_print(f"   🐍 Python: {sys.version.split()[0]}")
     safe_print("")
 
@@ -1080,7 +1175,9 @@ def main() -> None:
     safe_print(f"   - SLACK_OAUTH_CLIENT_ID: {client_id}")
     safe_print(f"   - SLACK_OAUTH_CLIENT_SECRET: {redacted_secret}")
     safe_print(f"   - SLACK_EXTERNAL_URL: {os.getenv('SLACK_EXTERNAL_URL', 'Not Set')}")
-    safe_print(f"   - SLACK_CREDS_BUCKET: {os.getenv('SLACK_CREDS_BUCKET', 'slack-mcp-creds-flow-os')}")
+    safe_print(
+        f"   - SLACK_CREDS_BUCKET: {os.getenv('SLACK_CREDS_BUCKET', 'slack-mcp-creds-flow-os')}"
+    )
     safe_print(f"   - PORT: {port}")
     safe_print("")
 
@@ -1088,6 +1185,7 @@ def main() -> None:
     safe_print("🛠️  Loading Slack tools...")
     try:
         from tools import slack_tools  # noqa: F401
+
         safe_print("   ✓ Slack tools loaded")
     except ModuleNotFoundError as e:
         logger.error(f"Failed to load Slack tools: {e}", exc_info=True)

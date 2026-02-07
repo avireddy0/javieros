@@ -48,7 +48,7 @@ services:
     image: postgres:15
     environment:
       - POSTGRES_USER=openwebui
-      - POSTGRES_PASSWORD=openwebui
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_DB=openwebui
     volumes:
       - pgdata:/var/lib/postgresql/data

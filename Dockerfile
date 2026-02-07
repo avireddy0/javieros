@@ -1,4 +1,5 @@
 FROM ghcr.io/open-webui/open-webui:main
+# TODO: Pin to SHA digest for supply chain security (V003)
 
 ENV WEBUI_AUTH=true \
     ENABLE_OPENAI_API=true \
@@ -73,5 +74,9 @@ if "ide_hook.router" not in main_text:
 
 main_path.write_text(main_text)
 PY
+
+RUN grep -q 'whatsapp_qr.router' /app/backend/open_webui/main.py && \
+    grep -q 'ide_hook.router' /app/backend/open_webui/main.py || \
+    (echo "FATAL: Patch verification failed" && exit 1)
 
 CMD ["/app/start.sh"]

@@ -62,7 +62,10 @@ spec:
             - name: OPENAI_API_BASE_URL
               value: "http://localhost:9099"
             - name: OPENAI_API_KEY
-              value: "0p3n-w3bu!"
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: openai-api-key
             - name: ENABLE_OLLAMA_API
               value: "false"
             - name: ENABLE_OAUTH_ID_TOKEN_COOKIE
@@ -181,6 +184,8 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: whatsapp-api-token
+            - name: WHATSAPP_ALLOWED_ORIGINS
+              value: "https://open-webui-a4bmliuj7q-uc.a.run.app"
           startupProbe:
             httpGet:
               path: /health

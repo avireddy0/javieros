@@ -4,6 +4,7 @@ const path = require('path')
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const pino = require('pino')
 const QRCode = require('qrcode')
+const crypto = require('crypto')
 
 const app = express()
 app.set('trust proxy', 1)
@@ -12,7 +13,7 @@ app.use(express.json())
 const SESSION_DIR = process.env.WHATSAPP_SESSION_DIR || '/data/whatsapp-session'
 const RECONNECT_DELAY_MS = Number(process.env.WHATSAPP_RECONNECT_DELAY_MS || 3000)
 const BRIDGE_TOKEN = process.env.WHATSAPP_BRIDGE_TOKEN || ''
-const ALLOW_INSECURE = process.env.WHATSAPP_ALLOW_INSECURE === 'true'
+
 const HISTORY_FILE = process.env.WHATSAPP_HISTORY_FILE || path.join(SESSION_DIR, 'history.json')
 const HISTORY_MAX_MESSAGES = Number(process.env.WHATSAPP_HISTORY_MAX_MESSAGES || 200)
 const HISTORY_MAX_CHATS = Number(process.env.WHATSAPP_HISTORY_MAX_CHATS || 200)
@@ -240,8 +241,8 @@ async function connectWhatsApp(force = false) {
 }
 
 function requireBridgeAuth(req, res) {
-  if (ALLOW_INSECURE) return true
-  if (req.get('X-WhatsApp-Bridge-Token') === BRIDGE_TOKEN) return true
+  const provided = req.get('X-WhatsApp-Bridge-Token') || '';
+  if (provided.length === BRIDGE_TOKEN.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(BRIDGE_TOKEN))) return true;
   res.status(401).json({ error: 'Unauthorized' })
   return false
 }
@@ -321,9 +322,9 @@ app.post('/messages', async (req, res) => {
 
 const PORT = process.env.PORT || 3000
 
-if (!ALLOW_INSECURE && !BRIDGE_TOKEN) {
-  console.error('WHATSAPP_BRIDGE_TOKEN is required. Set WHATSAPP_ALLOW_INSECURE=true to override.')
-  process.exit(1)
+if (!BRIDGE_TOKEN) {
+  console.error('FATAL: WHATSAPP_BRIDGE_TOKEN must be set and non-empty');
+  process.exit(1);
 }
 
 fs.mkdirSync(SESSION_DIR, { recursive: true })

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 import secrets
 import time
@@ -26,15 +27,13 @@ import logging
 _log = logging.getLogger("whatsapp-api")
 
 if not BRIDGE_TOKEN:
-    _log.warning("WHATSAPP_BRIDGE_TOKEN not set — API endpoints will return 503")
+    raise RuntimeError("WHATSAPP_BRIDGE_TOKEN must be set and non-empty")
 
 if not API_TOKEN:
-    _log.warning("WHATSAPP_API_TOKEN not set — API endpoints will return 503")
+    raise RuntimeError("WHATSAPP_API_TOKEN must be set and non-empty")
 
 _origins = [
-    o.strip()
-    for o in os.getenv("WHATSAPP_ALLOWED_ORIGINS", "*").split(",")
-    if o.strip()
+    o.strip() for o in os.getenv("WHATSAPP_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
 ALLOWED_ORIGINS = _origins or ["*"]
 ALLOW_CREDENTIALS = ALLOWED_ORIGINS != ["*"]
@@ -111,7 +110,7 @@ def _is_valid_qr_session(token: str) -> bool:
 
 def _require_api_auth(req: Request, *, allow_qr_session: bool = False) -> None:
     provided = _extract_token(req)
-    if provided == API_TOKEN:
+    if hmac.compare_digest(provided, API_TOKEN):
         return
     if allow_qr_session and _is_valid_qr_session(provided):
         return
@@ -238,7 +237,7 @@ async def create_qr_session(req: Request):
         token,
         max_age=max_age,
         httponly=True,
-        secure=False,
+        secure=True,
         samesite="strict",
         path="/",
     )
