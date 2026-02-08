@@ -56,4 +56,57 @@ if "cron_proxy.router" not in main_text:
         marker + '\napp.include_router(cron_proxy.router, prefix="/api/cron", tags=["cron"])',
     )
 
+# --- Fix OAuth callback 401 bug ---
+# The /oauth/clients/{client_id}/callback endpoint requires Bearer token auth
+# via get_verified_user, but browser redirects from Google don't carry the token.
+# Fix: store user_id in session during /authorize, recover it in /callback.
+
+# 1. Store user.id in session before authorize redirect
+authorize_return = "    return await oauth_client_manager.handle_authorize(request, client_id=client_id)"
+if authorize_return in main_text:
+    main_text = main_text.replace(
+        authorize_return,
+        '    request.session["oauth_user_id"] = user.id\n' + authorize_return,
+    )
+
+# 2. Replace callback to use session instead of Bearer token
+old_callback = """@app.get("/oauth/clients/{client_id}/callback")
+async def oauth_client_callback(
+    client_id: str,
+    request: Request,
+    response: Response,
+    user=Depends(get_verified_user),
+):
+    return await oauth_client_manager.handle_callback(
+        request,
+        client_id=client_id,
+        user_id=user.id if user else None,
+        response=response,
+    )"""
+
+new_callback = """@app.get("/oauth/clients/{client_id}/callback")
+async def oauth_client_callback(
+    client_id: str,
+    request: Request,
+    response: Response,
+):
+    user_id = request.session.get("oauth_user_id")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="OAuth session expired or not found. Please retry the authorization flow.",
+        )
+    return await oauth_client_manager.handle_callback(
+        request,
+        client_id=client_id,
+        user_id=user_id,
+        response=response,
+    )"""
+
+if old_callback in main_text:
+    main_text = main_text.replace(old_callback, new_callback)
+    print("OK: Patched OAuth callback to use session-based auth")
+else:
+    print("WARN: Could not find OAuth callback pattern to patch")
+
 main_path.write_text(main_text)

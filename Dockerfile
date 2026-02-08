@@ -31,7 +31,8 @@ RUN python3 /tmp/patch_main.py && rm /tmp/patch_main.py
 
 RUN grep -q 'whatsapp_qr.router' /app/backend/open_webui/main.py && \
     grep -q 'ide_hook.router' /app/backend/open_webui/main.py && \
-    grep -q 'cron_proxy.router' /app/backend/open_webui/main.py || \
+    grep -q 'cron_proxy.router' /app/backend/open_webui/main.py && \
+    grep -q 'oauth_user_id' /app/backend/open_webui/main.py || \
     (echo "FATAL: Patch verification failed" && exit 1)
 
 CMD ["/app/start.sh"]
