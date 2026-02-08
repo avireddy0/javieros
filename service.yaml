@@ -71,11 +71,11 @@ spec:
             - name: ENABLE_OAUTH_ID_TOKEN_COOKIE
               value: "false"
             - name: WEBUI_ADMIN_EMAIL
-              value: "jabarrios@flow.life"
+              value: "avi@envsn.com"
             - name: WEBUI_ADMIN_NAME
-              value: "Javier Barrios"
+              value: "Avi Reddy"
             - name: ENABLE_SIGNUP
-              value: "false"
+              value: "true"
             - name: DEFAULT_MODELS
               value: ""
             - name: DEFAULT_USER_ROLE
