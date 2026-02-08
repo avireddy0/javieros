@@ -11,7 +11,8 @@ Open WebUI deployment with custom WhatsApp (Baileys) integration, MCP tool serve
 ├── docker-compose.yml      # Local dev stack
 ├── start.sh                # Startup helpers + tool header injection
 ├── pipelines/              # Optional AI pipelines (Anthropic/Gemini)
-├── servers/                # MCP + OpenAPI sidecars
+├── servers/                # MCP + OpenAPI sidecars (WhatsApp, messaging bridges)
+│   └── messaging/          # Unified Telegram/Discord/Teams bridge
 ├── whatsapp-bridge/        # Node Baileys bridge
 ├── webui/                  # Custom Open WebUI hooks/routes
 ├── tests/                  # Smoke tests
@@ -28,6 +29,7 @@ Open WebUI deployment with custom WhatsApp (Baileys) integration, MCP tool serve
 | WhatsApp API | `servers/whatsapp/main.py` | OpenAPI tool server |
 | WhatsApp UI hook | `webui/custom.js` | Tool toggle → QR modal |
 | QR proxy/router | `webui/whatsapp_qr.py` | `/api/v1/whatsapp/*` |
+| Messaging bridges | `servers/messaging/main.py` | Telegram/Discord/Teams webhooks |
 | MCP servers | `servers/slack-mcp/` | OAuth MCP |
 | CI deploy | `.github/workflows/deploy.yml` | gcloud replace |
 | Tests | `tests/webui-smoke.sh` | Requires OPENAI_API_KEY |
@@ -42,7 +44,7 @@ Open WebUI deployment with custom WhatsApp (Baileys) integration, MCP tool serve
 - Avoid adding new tool servers without matching updates in `service.yaml` and `docker-compose.yml`.
 
 ## UNIQUE STYLES
-- Cloud Run sidecars: Open WebUI + WhatsApp bridge + WhatsApp API in one service.
+- Cloud Run sidecars: Open WebUI + WhatsApp bridge + WhatsApp API + messaging bridges (Telegram/Discord/Teams) + memory service in one service.
 - Open WebUI base image is patched at build time to add custom JS and routers.
 
 ## COMMANDS

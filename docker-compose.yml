@@ -38,7 +38,7 @@ services:
       - WEB_SEARCH_RESULT_COUNT=5
       - WEB_SEARCH_CONCURRENT_REQUESTS=2
       - WEB_LOADER_CONCURRENT_REQUESTS=5
-      - TOOL_SERVER_CONNECTIONS=[{"type":"mcp","url":"https://envision-mcp-845049957105.us-central1.run.app","path":"/mcp","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"envision-mcp","name":"Envision MCP","description":"Construction intelligence and project systems via MCP (streamable HTTP)."}},{"type":"mcp","url":"https://slack-mcp-a4bmliuj7q-uc.a.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"openapi","url":"http://whatsapp-api:8000","path":"/openapi.json","spec_type":"url","spec":"","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp","name":"WhatsApp Tools","description":"WhatsApp messaging and session controls for assistant workflows."}}]
+      - TOOL_SERVER_CONNECTIONS=[{"type":"mcp","url":"https://envision-mcp-845049957105.us-central1.run.app","path":"/mcp","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"envision-mcp","name":"Envision MCP","description":"Construction intelligence and project systems via MCP (streamable HTTP)."}},{"type":"mcp","url":"https://slack-mcp-a4bmliuj7q-uc.a.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","spec_type":"url","spec":"","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"openapi","url":"http://whatsapp-api:8000","path":"/openapi.json","spec_type":"url","spec":"","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp","name":"WhatsApp Tools","description":"WhatsApp messaging and session controls for assistant workflows."}},{"type":"openapi","url":"http://messaging-service:8005","path":"/openapi.json","spec_type":"url","spec":"","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"messaging","name":"Messaging Bridges","description":"Telegram, Discord, and Teams messaging bridges."}}]
       # Optional native Anthropic support
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CRON_TOKEN=${CRON_TOKEN}
@@ -96,6 +96,29 @@ services:
       - MEMORY_ALLOWED_ORIGINS=http://localhost:8080
       - CRON_TOKEN=${CRON_TOKEN}
       - OPENWEBUI_API_KEY=${OPENWEBUI_API_KEY}
+    restart: unless-stopped
+
+  # ── Messaging Service ──────────────────────────────────────
+  # Unified Telegram / Discord / Teams bridge (Phase 2)
+
+  messaging-service:
+    build: ./servers/messaging
+    ports:
+      - "8005:8005"
+    environment:
+      - MESSAGING_API_TOKEN=${MESSAGING_API_TOKEN}
+      - OPENWEBUI_BASE_URL=http://open-webui:8080
+      - OPENWEBUI_API_KEY=${OPENWEBUI_API_KEY}
+      - OPENWEBUI_MODEL=anthropic/claude-sonnet-4-20250514
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_SECRET_TOKEN=${TELEGRAM_SECRET_TOKEN}
+      - DISCORD_APP_ID=${DISCORD_APP_ID}
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - TEAMS_APP_ID=${TEAMS_APP_ID}
+      - TEAMS_APP_PASSWORD=${TEAMS_APP_PASSWORD}
+    depends_on:
+      - open-webui
     restart: unless-stopped
 
 volumes:

@@ -244,6 +244,69 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 20
+        - name: messaging-service
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/messaging-service:v2.0.1770527825
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi
+          env:
+            - name: MESSAGING_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: messaging-api-token
+            - name: OPENWEBUI_BASE_URL
+              value: "http://localhost:8080"
+            - name: OPENWEBUI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: open-webui-token-avi
+            - name: OPENWEBUI_MODEL
+              value: "anthropic/claude-sonnet-4-20250514"
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: telegram-bot-token
+            - name: TELEGRAM_SECRET_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: telegram-secret-token
+            - name: DISCORD_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: discord-app-id
+            - name: DISCORD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: discord-public-key
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: discord-bot-token
+            - name: TEAMS_APP_ID
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: teams-app-id
+            - name: TEAMS_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: teams-app-password
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8005
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
       volumes:
         - name: whatsapp-sessions
           csi:
