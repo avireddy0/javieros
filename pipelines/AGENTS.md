@@ -11,6 +11,7 @@ Optional AI pipelines (Anthropic/Gemini) and helper tooling; not required for co
 | Open WebUI API helper | `pipelines/openwebui_api.py` | Proxy to Open WebUI |
 | WhatsApp tool wrapper | `pipelines/tools/whatsapp.py` | Disabled by default |
 | Shared helpers | `pipelines/common.py` | Message normalization |
+| DLP filter | `pipelines/dlp_filter.py` | GCP Sensitive Data Protection |
 | Dependencies | `pipelines/requirements.txt` | Python deps |
 
 ## CONVENTIONS
