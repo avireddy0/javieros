@@ -53,6 +53,7 @@ Only the following filenames are accepted (validated via regex whitelist):
 | `POST` | `/cron/morning-briefing` | Generate daily morning briefing from USER.md, MEMORY.md, HEARTBEAT.md |
 | `POST` | `/cron/inbox-summary` | Summarize recent daily log entries |
 | `POST` | `/cron/weekly-report` | Generate weekly summary from past 7 DAILY_LOG files |
+| `POST` | `/cron/heartbeat-check` | Check HEARTBEAT.md for overdue/due-soon items, generate alerts |
 
 Cron endpoints are authenticated separately via `CRON_TOKEN` (not `MEMORY_API_TOKEN`). They call the Open WebUI LLM API (`/api/chat/completions` on localhost:8080) to generate summaries, then store results in `DAILY_LOG_YYYY-MM-DD.md`.
 

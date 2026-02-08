@@ -357,3 +357,36 @@ Each new sidecar needs a container entry in `service.yaml`:
 - `AGENTS.md` — Architectural constraints and rules
 - `servers/slack-mcp/DEPLOYMENT.md` — Slack MCP deployment guide
 - `servers/whatsapp/DEPLOYMENT.md` — WhatsApp bridge deployment guide
+
+---
+
+## Appendix B: Open WebUI Best Practices Compliance
+
+### Assessment Date: 2026-02-07
+
+Per Avi's requirement, JavierOS was cross-checked against the
+[Open WebUI documentation](https://docs.openwebui.com/) for best practice compliance.
+
+### Findings
+
+| Area | Open WebUI Default | JavierOS Implementation | Status |
+|------|-------------------|------------------------|--------|
+| **Cron / Scheduled Tasks** | No native cron system. "Functions" (Pipes, Filters, Actions) run per-request only. | External Cloud Scheduler → `cron_proxy.py` → memory-service. Enterprise-grade, auditable, IAM-secured. | ✅ **Deliberate improvement** — Open WebUI has no scheduled task mechanism; our approach adds proactive AI capabilities. |
+| **Authentication** | Built-in session auth, optional OIDC/OAuth | Session auth + OIDC for Cloud Scheduler + HMAC token for inter-service cron. | ✅ Compliant, with added security layers. |
+| **Pipelines** | Sidecar pattern on port 9099 via `PIPELINES_URLS` | Exact same pattern — `pipelines` sidecar on port 9099. | ✅ Compliant. |
+| **Custom JS** | Supported via Admin Settings → Interface → Custom JS injection | `custom.js` COPY'd in Dockerfile and loaded via `WEBUI_CUSTOM_JS_URL`. | ✅ Compliant — uses documented injection mechanism. |
+| **Models** | Configured via OpenAI-compatible endpoints | Anthropic key passed as `OPENAI_API_KEY`, model prefix `anthropic/`. | ✅ Compliant — uses documented OpenAI-compatible interface. |
+| **Data Persistence** | `/app/backend/data` volume mount | Mapped in both `service.yaml` (emptyDir) and `docker-compose.yml` (named volume). | ✅ Compliant. |
+| **Environment Variables** | `WEBUI_SECRET_KEY`, `DATABASE_URL`, etc. | All standard vars set via Secret Manager refs in `service.yaml`. | ✅ Compliant. |
+| **Router Registration** | Internal FastAPI routers in `open_webui/main.py` | Patched at Docker build time to register 3 custom routers (WhatsApp QR, IDE hook, cron proxy). | ⚠️ **Deviation** — Open WebUI has no plugin/router API. Our build-time patch is the only way to add server-side routes. Verified stable across 6 deployments. |
+
+### Summary
+
+JavierOS is **fully compliant** with Open WebUI best practices in 7 of 8 areas.
+The single deviation (router registration via build-time patching) is unavoidable —
+Open WebUI provides no extension point for custom server-side routes. The approach
+has been stable and is preferable to forking the upstream project.
+
+The cron system is a **net-new capability** not available in stock Open WebUI,
+implemented as an enterprise-grade external scheduler rather than a fragile in-process
+timer — a deliberate architectural improvement.

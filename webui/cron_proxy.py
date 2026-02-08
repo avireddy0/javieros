@@ -82,6 +82,11 @@ async def proxy_weekly_report(request: Request) -> Response:
     return await _proxy_to_memory_service("POST", "/cron/weekly-report", request)
 
 
+@router.post("/heartbeat-check")
+async def proxy_heartbeat_check(request: Request) -> Response:
+    return await _proxy_to_memory_service("POST", "/cron/heartbeat-check", request)
+
+
 @router.get("/health")
 async def cron_proxy_health() -> dict:
     """Health check for the cron proxy layer."""

@@ -547,3 +547,88 @@ async def cron_weekly_report(authorization: str = Header(...)):
         "report_length": len(report),
         "days_with_logs": len(logs),
     }
+
+
+# ---------------------------------------------------------------------------
+# Cron: heartbeat check (every 30 min)
+# ---------------------------------------------------------------------------
+
+HEARTBEAT_CHECK_SYSTEM = (
+    "You are a proactive personal assistant monitoring a user's HEARTBEAT.md file. "
+    "This file contains tasks, reminders, deadlines, and follow-ups with dates. "
+    "Analyze the items and today's date. Identify:\n"
+    "1. OVERDUE items (past their due date)\n"
+    "2. DUE TODAY items\n"
+    "3. DUE SOON items (within the next 48 hours)\n\n"
+    "For each flagged item, write a brief, actionable notification. "
+    "If nothing is due or overdue, respond with exactly: NO_ALERTS\n"
+    "Format output as a markdown list of alerts, each with urgency level "
+    "(🔴 OVERDUE, 🟡 DUE TODAY, 🟢 DUE SOON) and the original item text."
+)
+
+
+@app.post("/cron/heartbeat-check")
+async def cron_heartbeat_check(authorization: str = Header(...)):
+    """Check HEARTBEAT.md for overdue/due-soon items and generate alerts."""
+    verify_cron_token(authorization)
+    user_id = CRON_DEFAULT_USER
+    today = datetime.now(timezone.utc)
+    today_str = today.strftime("%Y-%m-%d")
+
+    heartbeat = await read_file_safe(user_id, "HEARTBEAT.md")
+    if not heartbeat:
+        return {
+            "status": "skipped",
+            "reason": "No HEARTBEAT.md found",
+            "user_id": user_id,
+        }
+
+    user_prompt = (
+        f"Today is {today_str} (UTC). Here is the user's HEARTBEAT.md:\n\n"
+        f"```markdown\n{heartbeat}\n```\n\n"
+        "Analyze all items with dates and generate alerts for anything "
+        "overdue, due today, or due within 48 hours."
+    )
+
+    try:
+        alerts = await call_llm(HEARTBEAT_CHECK_SYSTEM, user_prompt)
+    except httpx.HTTPError as e:
+        logger.error("LLM call failed for heartbeat-check: %s", e)
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
+
+    if alerts.strip() == "NO_ALERTS":
+        return {
+            "status": "clear",
+            "job": "heartbeat-check",
+            "user_id": user_id,
+            "date": today_str,
+            "message": "No overdue or upcoming items",
+        }
+
+    # Append alerts to today's daily log
+    log_filename = f"DAILY_LOG_{today_str}.md"
+    time_str = today.strftime("%H:%M UTC")
+    log_entry = f"## Heartbeat Check — {time_str}\n\n{alerts}"
+    blob = bucket.blob(blob_path(user_id, log_filename))
+
+    existing = ""
+    try:
+        existing = blob.download_as_text()
+    except NotFound:
+        pass
+
+    if existing:
+        content = existing + "\n\n---\n\n" + log_entry
+    else:
+        content = log_entry
+
+    blob.upload_from_string(content, content_type="text/markdown")
+
+    return {
+        "status": "alerts_generated",
+        "job": "heartbeat-check",
+        "user_id": user_id,
+        "date": today_str,
+        "filename": log_filename,
+        "alerts_length": len(alerts),
+    }
