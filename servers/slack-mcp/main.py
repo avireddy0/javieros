@@ -79,6 +79,12 @@ SLACK_SCOPES = [
     "mpim:history",
     "mpim:read",
     "search:read",
+    "reactions:read",
+    "reactions:write",
+    "files:read",
+    "pins:read",
+    "bookmarks:read",
+    "stars:read",
 ]
 
 
@@ -459,7 +465,7 @@ async def oauth2_authorize(request: Request):
 
     slack_params = {
         "client_id": slack_client_id,
-        "scope": ",".join(SLACK_SCOPES),
+        "user_scope": ",".join(SLACK_SCOPES),
         "redirect_uri": slack_redirect_uri,
         "state": internal_state,
     }
@@ -470,8 +476,19 @@ async def oauth2_authorize(request: Request):
     return RedirectResponse(url=slack_auth_url, status_code=302)
 
 
+@server.custom_route("/oauth2callback", methods=["GET"])
+async def oauth2_callback_compat(request: Request):
+    """Backward-compatible callback route (matches Slack app redirect URI)."""
+    return await _handle_slack_callback(request)
+
+
 @server.custom_route("/oauth2/callback", methods=["GET"])
 async def oauth2_callback(request: Request):
+    """OAuth callback from Slack (canonical route)."""
+    return await _handle_slack_callback(request)
+
+
+async def _handle_slack_callback(request: Request):
     """
     OAuth callback from Slack.
 
@@ -531,16 +548,22 @@ async def oauth2_callback(request: Request):
                 status_code=500, detail=f"Slack token exchange failed: {error_msg}"
             )
 
-        # Extract token information
-        access_token = response.get("access_token")
-        refresh_token = response.get("refresh_token")
+        # Extract token information — use user token (xoxp-*), not bot token
         team_id = response.get("team", {}).get("id")
         authed_user = response.get("authed_user", {})
         user_id = authed_user.get("id")
+        # Personal OAuth: user token is in authed_user, not top-level
+        access_token = authed_user.get("access_token") or response.get("access_token")
+        refresh_token = authed_user.get("refresh_token") or response.get("refresh_token")
         expires_in = authed_user.get("expires_in")
         scopes = authed_user.get("scope", "").split(",")
 
         if not access_token or not user_id or not team_id:
+            logger.error(
+                f"Invalid Slack token response: access_token={bool(access_token)}, "
+                f"user_id={user_id}, team_id={team_id}, "
+                f"keys={list(response.data.keys()) if hasattr(response, 'data') else list(response.keys())}"
+            )
             raise HTTPException(status_code=500, detail="Invalid Slack token response")
 
         # Store Slack token in GCS
@@ -938,6 +961,214 @@ async def api_get_user(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
+@server.custom_route("/api/channels/{channel_id}/threads/{thread_ts}", methods=["GET"])
+async def api_get_thread_replies(request: Request):
+    """REST API: Get thread replies."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    channel_id = request.path_params.get("channel_id")
+    thread_ts = request.path_params.get("thread_ts")
+    limit = int(request.query_params.get("limit", "100"))
+
+    try:
+        result = client.conversations_replies(
+            channel=channel_id, ts=thread_ts, limit=limit
+        )
+        messages = [
+            {"text": m.get("text", ""), "user": m.get("user"), "ts": m["ts"]}
+            for m in result["messages"]
+        ]
+        return JSONResponse({"ok": True, "messages": messages})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/dms", methods=["GET"])
+async def api_list_dms(request: Request):
+    """REST API: List direct messages."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    limit = int(request.query_params.get("limit", "100"))
+
+    try:
+        result = client.conversations_list(types="im", limit=limit)
+        dms = [
+            {"id": ch["id"], "user": ch.get("user")}
+            for ch in result["channels"]
+        ]
+        return JSONResponse({"ok": True, "dms": dms})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/reactions", methods=["POST"])
+async def api_add_reaction(request: Request):
+    """REST API: Add reaction to a message."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    body = await request.json()
+    channel = body.get("channel")
+    timestamp = body.get("timestamp")
+    name = body.get("name")
+
+    if not all([channel, timestamp, name]):
+        return JSONResponse(
+            {"ok": False, "error": "channel, timestamp, and name required"},
+            status_code=400,
+        )
+
+    try:
+        client.reactions_add(channel=channel, timestamp=timestamp, name=name)
+        return JSONResponse({"ok": True, "reaction": name})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/files", methods=["GET"])
+async def api_list_files(request: Request):
+    """REST API: List shared files."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    params = request.query_params
+    kwargs = {
+        "types": params.get("types", "all"),
+        "count": min(int(params.get("count", "20")), 100),
+    }
+    if params.get("channel"):
+        kwargs["channel"] = params["channel"]
+    if params.get("user"):
+        kwargs["user"] = params["user"]
+
+    try:
+        result = client.files_list(**kwargs)
+        files = [
+            {
+                "id": f["id"],
+                "name": f.get("name", ""),
+                "title": f.get("title", ""),
+                "filetype": f.get("filetype", ""),
+                "size": f.get("size", 0),
+                "user": f.get("user", ""),
+                "permalink": f.get("permalink", ""),
+            }
+            for f in result.get("files", [])
+        ]
+        return JSONResponse({"ok": True, "files": files})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/channels/{channel_id}/pins", methods=["GET"])
+async def api_get_pins(request: Request):
+    """REST API: Get pinned messages in a channel."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    channel_id = request.path_params.get("channel_id")
+    try:
+        result = client.pins_list(channel=channel_id)
+        pins = [
+            {
+                "type": item.get("type", ""),
+                "created": item.get("created", 0),
+                "message": {
+                    "text": item.get("message", {}).get("text", ""),
+                    "user": item.get("message", {}).get("user", ""),
+                    "ts": item.get("message", {}).get("ts", ""),
+                }
+                if item.get("message")
+                else None,
+            }
+            for item in result.get("items", [])
+        ]
+        return JSONResponse({"ok": True, "pins": pins})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/channels/{channel_id}/bookmarks", methods=["GET"])
+async def api_get_bookmarks(request: Request):
+    """REST API: Get bookmarks in a channel."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    channel_id = request.path_params.get("channel_id")
+    try:
+        result = client.bookmarks_list(channel_id=channel_id)
+        bookmarks = [
+            {
+                "id": b.get("id", ""),
+                "title": b.get("title", ""),
+                "type": b.get("type", ""),
+                "link": b.get("link", ""),
+            }
+            for b in result.get("bookmarks", [])
+        ]
+        return JSONResponse({"ok": True, "bookmarks": bookmarks})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/stars", methods=["GET"])
+async def api_get_stars(request: Request):
+    """REST API: Get starred items."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    count = min(int(request.query_params.get("count", "20")), 100)
+    try:
+        result = client.stars_list(count=count)
+        stars = []
+        for item in result.get("items", []):
+            star = {"type": item.get("type", "")}
+            if item.get("type") == "message":
+                msg = item.get("message", {})
+                star["message"] = {
+                    "text": msg.get("text", ""),
+                    "user": msg.get("user", ""),
+                    "ts": msg.get("ts", ""),
+                }
+                star["channel"] = item.get("channel", "")
+            elif item.get("type") == "file":
+                f = item.get("file", {})
+                star["file"] = {"id": f.get("id", ""), "name": f.get("name", "")}
+            stars.append(star)
+        return JSONResponse({"ok": True, "stars": stars})
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@server.custom_route("/api/me", methods=["GET"])
+async def api_get_me(request: Request):
+    """REST API: Get authenticated user info."""
+    client = _get_slack_client_from_token(request)
+    if not client:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        result = client.auth_test()
+        return JSONResponse({
+            "ok": True,
+            "user_id": result["user_id"],
+            "user": result["user"],
+            "team_id": result["team_id"],
+            "team": result["team"],
+        })
+    except SlackApiError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
 # =============================================================================
 # OpenAPI Specification Endpoint
 # =============================================================================
@@ -974,6 +1205,14 @@ async def openapi_spec(request: Request):
                                 "chat:write": "Send messages",
                                 "users:read": "View users",
                                 "search:read": "Search messages",
+                                "reactions:read": "View reactions",
+                                "reactions:write": "Add reactions",
+                                "im:history": "Read direct messages",
+                                "groups:history": "Read private channels",
+                                "files:read": "View shared files",
+                                "pins:read": "View pinned messages",
+                                "bookmarks:read": "View channel bookmarks",
+                                "stars:read": "View starred items",
                             },
                         }
                     },
@@ -1109,6 +1348,152 @@ async def openapi_spec(request: Request):
                         }
                     ],
                     "responses": {"200": {"description": "User details"}},
+                }
+            },
+            "/api/channels/{channel_id}/threads/{thread_ts}": {
+                "get": {
+                    "operationId": "getThreadReplies",
+                    "summary": "Get all replies in a message thread",
+                    "parameters": [
+                        {
+                            "name": "channel_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "thread_ts",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        },
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 100},
+                        },
+                    ],
+                    "responses": {"200": {"description": "Thread messages"}},
+                }
+            },
+            "/api/dms": {
+                "get": {
+                    "operationId": "listDirectMessages",
+                    "summary": "List direct message conversations",
+                    "parameters": [
+                        {
+                            "name": "limit",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 100},
+                        },
+                    ],
+                    "responses": {"200": {"description": "List of DM conversations"}},
+                }
+            },
+            "/api/reactions": {
+                "post": {
+                    "operationId": "addReaction",
+                    "summary": "Add emoji reaction to a message",
+                    "requestBody": {
+                        "required": True,
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "required": ["channel", "timestamp", "name"],
+                                    "properties": {
+                                        "channel": {"type": "string"},
+                                        "timestamp": {"type": "string"},
+                                        "name": {"type": "string", "description": "Emoji name without colons"},
+                                    },
+                                }
+                            }
+                        },
+                    },
+                    "responses": {"200": {"description": "Reaction added"}},
+                }
+            },
+            "/api/files": {
+                "get": {
+                    "operationId": "listFiles",
+                    "summary": "List shared files in workspace or channel",
+                    "parameters": [
+                        {
+                            "name": "channel",
+                            "in": "query",
+                            "schema": {"type": "string"},
+                            "description": "Filter by channel ID",
+                        },
+                        {
+                            "name": "user",
+                            "in": "query",
+                            "schema": {"type": "string"},
+                            "description": "Filter by user ID",
+                        },
+                        {
+                            "name": "types",
+                            "in": "query",
+                            "schema": {"type": "string", "default": "all"},
+                            "description": "File types: all, images, gdocs, zips, pdfs",
+                        },
+                        {
+                            "name": "count",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 20},
+                        },
+                    ],
+                    "responses": {"200": {"description": "List of shared files"}},
+                }
+            },
+            "/api/channels/{channel_id}/pins": {
+                "get": {
+                    "operationId": "getChannelPins",
+                    "summary": "Get pinned messages in a channel",
+                    "parameters": [
+                        {
+                            "name": "channel_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {"200": {"description": "Pinned messages"}},
+                }
+            },
+            "/api/channels/{channel_id}/bookmarks": {
+                "get": {
+                    "operationId": "getChannelBookmarks",
+                    "summary": "Get bookmarks saved in a channel",
+                    "parameters": [
+                        {
+                            "name": "channel_id",
+                            "in": "path",
+                            "required": True,
+                            "schema": {"type": "string"},
+                        }
+                    ],
+                    "responses": {"200": {"description": "Channel bookmarks"}},
+                }
+            },
+            "/api/stars": {
+                "get": {
+                    "operationId": "getStarredItems",
+                    "summary": "Get the authenticated user's starred items",
+                    "parameters": [
+                        {
+                            "name": "count",
+                            "in": "query",
+                            "schema": {"type": "integer", "default": 20},
+                        },
+                    ],
+                    "responses": {"200": {"description": "Starred items"}},
+                }
+            },
+            "/api/me": {
+                "get": {
+                    "operationId": "getMe",
+                    "summary": "Get authenticated user's profile and workspace",
+                    "responses": {"200": {"description": "Current user info"}},
                 }
             },
         },

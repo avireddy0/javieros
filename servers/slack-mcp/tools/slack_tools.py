@@ -418,4 +418,522 @@ async def slack_get_user_info(user_id: str) -> dict:
         }
 
 
+# =============================================================================
+# Thread Tools
+# =============================================================================
+
+
+@server.tool()
+async def slack_get_thread_replies(
+    channel_id: str,
+    thread_ts: str,
+    limit: int = 100,
+) -> dict:
+    """
+    Get all replies in a message thread.
+
+    Args:
+        channel_id: Channel ID where the thread exists
+        thread_ts: Timestamp of the parent message (thread root)
+        limit: Maximum replies to return (default: 100)
+
+    Returns:
+        Full thread with parent message and all replies
+    """
+    client = _require_auth()
+
+    try:
+        result = client.conversations_replies(
+            channel=channel_id,
+            ts=thread_ts,
+            limit=limit,
+        )
+
+        messages = [
+            {
+                "text": msg.get("text", ""),
+                "user": msg.get("user"),
+                "ts": msg["ts"],
+                "thread_ts": msg.get("thread_ts"),
+                "is_parent": msg["ts"] == thread_ts,
+            }
+            for msg in result["messages"]
+        ]
+
+        return {
+            "ok": True,
+            "count": len(messages),
+            "messages": messages,
+            "has_more": result.get("has_more", False),
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_reply_to_thread(
+    channel: str,
+    thread_ts: str,
+    text: str,
+    broadcast: bool = False,
+) -> dict:
+    """
+    Reply to a thread in a Slack channel.
+
+    Args:
+        channel: Channel ID where the thread exists
+        thread_ts: Timestamp of the parent message to reply to
+        text: Reply message text
+        broadcast: Also send to channel (default: False)
+
+    Returns:
+        Reply result with timestamp
+    """
+    client = _require_auth()
+
+    try:
+        result = client.chat_postMessage(
+            channel=channel,
+            text=text,
+            thread_ts=thread_ts,
+            reply_broadcast=broadcast,
+        )
+
+        return {
+            "ok": True,
+            "channel": result["channel"],
+            "ts": result["ts"],
+            "thread_ts": result["message"]["thread_ts"],
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+# =============================================================================
+# DM Tools
+# =============================================================================
+
+
+@server.tool()
+async def slack_list_dms(limit: int = 100) -> dict:
+    """
+    List direct message conversations.
+
+    Args:
+        limit: Maximum DMs to return (default: 100)
+
+    Returns:
+        List of DM conversations with user info
+    """
+    client = _require_auth()
+
+    try:
+        result = client.conversations_list(types="im", limit=limit)
+
+        dms = [
+            {
+                "id": ch["id"],
+                "user": ch.get("user"),
+                "is_open": ch.get("is_open", False),
+                "latest_ts": ch.get("latest", {}).get("ts") if isinstance(ch.get("latest"), dict) else None,
+            }
+            for ch in result["channels"]
+        ]
+
+        return {"ok": True, "count": len(dms), "dms": dms}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_list_group_dms(limit: int = 100) -> dict:
+    """
+    List multi-person direct message conversations (group DMs).
+
+    Args:
+        limit: Maximum group DMs to return (default: 100)
+
+    Returns:
+        List of group DM conversations
+    """
+    client = _require_auth()
+
+    try:
+        result = client.conversations_list(types="mpim", limit=limit)
+
+        group_dms = [
+            {
+                "id": ch["id"],
+                "name": ch.get("name", ""),
+                "is_open": ch.get("is_open", False),
+                "num_members": ch.get("num_members", 0),
+                "purpose": ch.get("purpose", {}).get("value", ""),
+            }
+            for ch in result["channels"]
+        ]
+
+        return {"ok": True, "count": len(group_dms), "group_dms": group_dms}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_open_dm(user_id: str) -> dict:
+    """
+    Open a direct message conversation with a user.
+
+    Args:
+        user_id: User ID to open DM with
+
+    Returns:
+        DM channel info for sending messages
+    """
+    client = _require_auth()
+
+    try:
+        result = client.conversations_open(users=[user_id])
+        ch = result["channel"]
+
+        return {
+            "ok": True,
+            "channel": {
+                "id": ch["id"],
+                "is_im": ch.get("is_im", True),
+            },
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+# =============================================================================
+# Reaction Tools
+# =============================================================================
+
+
+@server.tool()
+async def slack_add_reaction(
+    channel: str,
+    timestamp: str,
+    name: str,
+) -> dict:
+    """
+    Add an emoji reaction to a message.
+
+    Args:
+        channel: Channel ID where the message is
+        timestamp: Message timestamp to react to
+        name: Emoji name without colons (e.g., 'thumbsup', 'heart', 'eyes')
+
+    Returns:
+        Result confirming reaction was added
+    """
+    client = _require_auth()
+
+    try:
+        client.reactions_add(channel=channel, timestamp=timestamp, name=name)
+        return {"ok": True, "reaction": name}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_get_reactions(channel: str, timestamp: str) -> dict:
+    """
+    Get all reactions on a message.
+
+    Args:
+        channel: Channel ID where the message is
+        timestamp: Message timestamp to get reactions for
+
+    Returns:
+        Message with all reactions and who reacted
+    """
+    client = _require_auth()
+
+    try:
+        result = client.reactions_get(channel=channel, timestamp=timestamp)
+        msg = result["message"]
+
+        reactions = [
+            {
+                "name": r["name"],
+                "count": r["count"],
+                "users": r["users"],
+            }
+            for r in msg.get("reactions", [])
+        ]
+
+        return {"ok": True, "reactions": reactions}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+# =============================================================================
+# Presence & Channel Management
+# =============================================================================
+
+
+@server.tool()
+async def slack_get_user_presence(user_id: str) -> dict:
+    """
+    Check if a user is currently online, away, or offline.
+
+    Args:
+        user_id: User ID to check presence for
+
+    Returns:
+        User presence status (active/away)
+    """
+    client = _require_auth()
+
+    try:
+        result = client.users_getPresence(user=user_id)
+        return {
+            "ok": True,
+            "presence": result["presence"],
+            "online": result.get("online", False),
+            "auto_away": result.get("auto_away", False),
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_join_channel(channel_id: str) -> dict:
+    """
+    Join a public Slack channel.
+
+    Args:
+        channel_id: Channel ID to join
+
+    Returns:
+        Channel info after joining
+    """
+    client = _require_auth()
+
+    try:
+        result = client.conversations_join(channel=channel_id)
+        ch = result["channel"]
+        return {
+            "ok": True,
+            "channel": {"id": ch["id"], "name": ch["name"]},
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_get_my_info() -> dict:
+    """
+    Get the authenticated user's own Slack profile and workspace info.
+
+    Returns:
+        Current user's profile, workspace name, and permissions
+    """
+    client = _require_auth()
+
+    try:
+        result = client.auth_test()
+        return {
+            "ok": True,
+            "user_id": result["user_id"],
+            "user": result["user"],
+            "team_id": result["team_id"],
+            "team": result["team"],
+            "url": result.get("url", ""),
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+# =============================================================================
+# File, Pin, Bookmark & Star Tools (OpenClaw parity)
+# =============================================================================
+
+
+@server.tool()
+async def slack_list_files(
+    channel: Optional[str] = None,
+    user: Optional[str] = None,
+    types: str = "all",
+    count: int = 20,
+) -> dict:
+    """
+    List files shared in a channel or by a user.
+
+    Args:
+        channel: Channel ID to filter by (optional)
+        user: User ID to filter by (optional)
+        types: File types to include (all, spaces, snippets, images, gdocs, zips, pdfs)
+        count: Number of files to return (default: 20, max: 100)
+
+    Returns:
+        List of shared files with metadata
+    """
+    client = _require_auth()
+
+    try:
+        kwargs = {"types": types, "count": min(count, 100)}
+        if channel:
+            kwargs["channel"] = channel
+        if user:
+            kwargs["user"] = user
+
+        result = client.files_list(**kwargs)
+
+        files = [
+            {
+                "id": f["id"],
+                "name": f.get("name", ""),
+                "title": f.get("title", ""),
+                "filetype": f.get("filetype", ""),
+                "size": f.get("size", 0),
+                "user": f.get("user", ""),
+                "url_private": f.get("url_private", ""),
+                "permalink": f.get("permalink", ""),
+                "created": f.get("created", 0),
+                "channels": f.get("channels", []),
+                "shares": list(f.get("shares", {}).get("public", {}).keys())
+                + list(f.get("shares", {}).get("private", {}).keys())
+                if f.get("shares")
+                else [],
+            }
+            for f in result.get("files", [])
+        ]
+
+        return {
+            "ok": True,
+            "count": len(files),
+            "total": result.get("paging", {}).get("total", len(files)),
+            "files": files,
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_get_pins(channel_id: str) -> dict:
+    """
+    Get pinned messages in a channel.
+
+    Args:
+        channel_id: Channel ID to get pins from
+
+    Returns:
+        List of pinned items with message content and who pinned them
+    """
+    client = _require_auth()
+
+    try:
+        result = client.pins_list(channel=channel_id)
+
+        pins = [
+            {
+                "type": item.get("type", ""),
+                "created": item.get("created", 0),
+                "created_by": item.get("created_by", ""),
+                "message": {
+                    "text": item.get("message", {}).get("text", ""),
+                    "user": item.get("message", {}).get("user", ""),
+                    "ts": item.get("message", {}).get("ts", ""),
+                    "permalink": item.get("message", {}).get("permalink", ""),
+                }
+                if item.get("message")
+                else None,
+            }
+            for item in result.get("items", [])
+        ]
+
+        return {"ok": True, "count": len(pins), "pins": pins}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_get_bookmarks(channel_id: str) -> dict:
+    """
+    Get bookmarks saved in a channel.
+
+    Args:
+        channel_id: Channel ID to get bookmarks from
+
+    Returns:
+        List of bookmarks with titles, links, and who added them
+    """
+    client = _require_auth()
+
+    try:
+        result = client.bookmarks_list(channel_id=channel_id)
+
+        bookmarks = [
+            {
+                "id": b.get("id", ""),
+                "title": b.get("title", ""),
+                "type": b.get("type", ""),
+                "link": b.get("link", ""),
+                "emoji": b.get("emoji", ""),
+                "icon_url": b.get("icon_url", ""),
+                "created": b.get("date_created", 0),
+                "updated": b.get("date_updated", 0),
+            }
+            for b in result.get("bookmarks", [])
+        ]
+
+        return {"ok": True, "count": len(bookmarks), "bookmarks": bookmarks}
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
+@server.tool()
+async def slack_get_stars(count: int = 20) -> dict:
+    """
+    Get the authenticated user's starred items.
+
+    Args:
+        count: Number of starred items to return (default: 20, max: 100)
+
+    Returns:
+        List of starred messages, files, and channels
+    """
+    client = _require_auth()
+
+    try:
+        result = client.stars_list(count=min(count, 100))
+
+        stars = []
+        for item in result.get("items", []):
+            star = {"type": item.get("type", "")}
+
+            if item.get("type") == "message":
+                msg = item.get("message", {})
+                star["message"] = {
+                    "text": msg.get("text", ""),
+                    "user": msg.get("user", ""),
+                    "ts": msg.get("ts", ""),
+                    "permalink": msg.get("permalink", ""),
+                }
+                star["channel"] = item.get("channel", "")
+            elif item.get("type") == "file":
+                f = item.get("file", {})
+                star["file"] = {
+                    "id": f.get("id", ""),
+                    "name": f.get("name", ""),
+                    "title": f.get("title", ""),
+                    "permalink": f.get("permalink", ""),
+                }
+            elif item.get("type") == "channel":
+                star["channel"] = item.get("channel", "")
+
+            stars.append(star)
+
+        return {
+            "ok": True,
+            "count": len(stars),
+            "total": result.get("paging", {}).get("total", len(stars)),
+            "stars": stars,
+        }
+    except SlackApiError as e:
+        return {"ok": False, "error": f"Slack API error: {e.response['error']}"}
+
+
 logger.info("Slack MCP tools registered successfully")
