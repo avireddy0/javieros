@@ -193,6 +193,27 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 20
+        - name: memory-service
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/memory-service:latest
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi
+          env:
+            - name: MEMORY_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: memory-api-token
+            - name: GCS_BUCKET_NAME
+              value: "javieros-memory"
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8003
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
       volumes:
         - name: whatsapp-sessions
           csi:

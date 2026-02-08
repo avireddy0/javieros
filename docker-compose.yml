@@ -82,6 +82,20 @@ services:
       - whatsapp-bridge
     restart: unless-stopped
 
+  # ── Memory Service ────────────────────────────────────────
+  # GCS-backed per-user markdown file storage sidecar
+
+  memory-service:
+    build: ./servers/memory
+    ports:
+      - "8004:8003"
+    environment:
+      - MEMORY_API_TOKEN=${MEMORY_API_TOKEN}
+      - GCS_BUCKET_NAME=javieros-memory
+      - MEMORY_ALLOWED_ORIGINS=http://localhost:8080
+    restart: unless-stopped
+
 volumes:
   pgdata:
   whatsapp-data:
+  memory-data:
