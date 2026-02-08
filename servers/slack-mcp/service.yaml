@@ -20,7 +20,7 @@ spec:
       serviceAccountName: open-webui-sa@flow-os-1769675656.iam.gserviceaccount.com
       containers:
         - name: slack-mcp
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/slack-mcp:v3-oauth21
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/slack-mcp:v4-oauth-fix
           ports:
             - containerPort: 8080
           resources:

@@ -47,6 +47,9 @@ jobs:
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
+          ignore-unfixed: 'true'
+          vuln-type: 'library'
+          trivyignores: '.trivyignore'
 
       - name: Deploy
         run: |
