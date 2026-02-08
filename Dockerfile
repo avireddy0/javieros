@@ -88,9 +88,34 @@ if "cron_proxy.router" not in main_text:
 main_path.write_text(main_text)
 PY
 
+COPY webui/security_headers.py /app/backend/open_webui/security_headers.py
+
+RUN python3 - <<'PY'
+import pathlib
+
+p = pathlib.Path('/app/backend/open_webui/main.py')
+t = p.read_text()
+
+imp = 'from open_webui.security_headers import SecurityHeadersMiddleware'
+mid = 'app.add_middleware(SecurityHeadersMiddleware)'
+marker = 'app = FastAPI('
+
+if imp not in t:
+    t = imp + '\n' + t
+
+if mid not in t:
+    idx = t.index(marker)
+    end = t.index(')', idx) + 1
+    nl = t.index('\n', end)
+    t = t[:nl+1] + mid + '\n' + t[nl+1:]
+
+p.write_text(t)
+PY
+
 RUN grep -q 'whatsapp_qr.router' /app/backend/open_webui/main.py && \
     grep -q 'ide_hook.router' /app/backend/open_webui/main.py && \
-    grep -q 'cron_proxy.router' /app/backend/open_webui/main.py || \
+    grep -q 'cron_proxy.router' /app/backend/open_webui/main.py && \
+    grep -q 'SecurityHeadersMiddleware' /app/backend/open_webui/main.py || \
     (echo "FATAL: Patch verification failed" && exit 1)
 
 CMD ["/app/start.sh"]

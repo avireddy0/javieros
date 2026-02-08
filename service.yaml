@@ -104,6 +104,11 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: cron-token
+            - name: WHATSAPP_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: whatsapp-api-token
           startupProbe:
             httpGet:
               path: /health

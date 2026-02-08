@@ -176,9 +176,9 @@ async def qr_modal(user=Depends(get_verified_user)):
 
 @router.get("/qr")
 async def get_qr(req: Request, user=Depends(get_verified_user)):
-    token = _extract_token(req)
+    token = WHATSAPP_API_TOKEN
     if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=500, detail="WhatsApp API token not configured")
     response = await _proxy_request(
         "GET",
         "/qr",
@@ -204,9 +204,9 @@ async def get_qr(req: Request, user=Depends(get_verified_user)):
 
 @router.get("/status")
 async def get_status(req: Request, user=Depends(get_verified_user)):
-    token = _extract_token(req)
+    token = WHATSAPP_API_TOKEN
     if not token:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=500, detail="WhatsApp API token not configured")
     response = await _proxy_request(
         "GET",
         "/status",

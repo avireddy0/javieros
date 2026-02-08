@@ -10,7 +10,7 @@ import os
 import logging
 
 import aiohttp
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request, Response, HTTPException, Depends
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,18 @@ CRON_TOKEN = "".join(os.environ.get("CRON_TOKEN", "").split())
 PROXY_TIMEOUT = aiohttp.ClientTimeout(
     total=180
 )  # cron jobs may take time for LLM calls
+
+
+def _validate_cron_token(request: Request):
+    """Validate that incoming cron requests carry the correct CRON_TOKEN."""
+    if not CRON_TOKEN:
+        return  # No token configured, skip validation
+    auth = request.headers.get("authorization", "")
+    if not auth.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    incoming = "".join(auth.split(" ", 1)[1].split())
+    if incoming != CRON_TOKEN:
+        raise HTTPException(status_code=403, detail="Invalid cron token")
 
 
 async def _proxy_to_memory_service(
@@ -68,22 +80,30 @@ async def _proxy_to_memory_service(
 
 
 @router.post("/morning-briefing")
-async def proxy_morning_briefing(request: Request) -> Response:
+async def proxy_morning_briefing(
+    request: Request, _validated=Depends(_validate_cron_token)
+) -> Response:
     return await _proxy_to_memory_service("POST", "/cron/morning-briefing", request)
 
 
 @router.post("/inbox-summary")
-async def proxy_inbox_summary(request: Request) -> Response:
+async def proxy_inbox_summary(
+    request: Request, _validated=Depends(_validate_cron_token)
+) -> Response:
     return await _proxy_to_memory_service("POST", "/cron/inbox-summary", request)
 
 
 @router.post("/weekly-report")
-async def proxy_weekly_report(request: Request) -> Response:
+async def proxy_weekly_report(
+    request: Request, _validated=Depends(_validate_cron_token)
+) -> Response:
     return await _proxy_to_memory_service("POST", "/cron/weekly-report", request)
 
 
 @router.post("/heartbeat-check")
-async def proxy_heartbeat_check(request: Request) -> Response:
+async def proxy_heartbeat_check(
+    request: Request, _validated=Depends(_validate_cron_token)
+) -> Response:
     return await _proxy_to_memory_service("POST", "/cron/heartbeat-check", request)
 
 
