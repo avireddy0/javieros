@@ -303,6 +303,7 @@ class OAuth21SessionStore:
         team_id: str,
         scopes: list,
         code_challenge: Optional[str] = None,
+        slack_access_token: Optional[str] = None,
         expires_in_seconds: int = 600,
     ) -> None:
         """
@@ -314,6 +315,7 @@ class OAuth21SessionStore:
             team_id: Slack workspace ID
             scopes: Granted scopes
             code_challenge: PKCE code challenge for validation
+            slack_access_token: The real Slack access token from OAuth
             expires_in_seconds: Code expiration (default 10 minutes)
         """
         with self._lock:
@@ -324,6 +326,7 @@ class OAuth21SessionStore:
                 "team_id": team_id,
                 "scopes": scopes,
                 "code_challenge": code_challenge,
+                "slack_access_token": slack_access_token,
                 "expires_at": expiry,
                 "created_at": now,
                 "used": False,
@@ -423,6 +426,7 @@ class OAuth21SessionStore:
         mcp_session_id: Optional[str] = None,
         bot_user_id: Optional[str] = None,
         enterprise_id: Optional[str] = None,
+        slack_access_token: Optional[str] = None,
     ):
         """
         Store OAuth 2.1 session information.
@@ -430,7 +434,7 @@ class OAuth21SessionStore:
         Args:
             user_id: Slack user ID
             team_id: Slack workspace ID
-            access_token: OAuth 2.1 access token
+            access_token: OAuth 2.1 access token (our bearer token)
             refresh_token: OAuth 2.1 refresh token
             token_type: Token type (usually "Bearer")
             scopes: List of granted scopes
@@ -439,6 +443,7 @@ class OAuth21SessionStore:
             mcp_session_id: FastMCP session ID to map to this user
             bot_user_id: Bot user ID if bot token
             enterprise_id: Slack enterprise ID
+            slack_access_token: The real Slack access token for API calls
         """
         with self._lock:
             session_key = f"slack_{team_id}_{user_id}"
@@ -456,6 +461,7 @@ class OAuth21SessionStore:
                 "mcp_session_id": mcp_session_id,
                 "bot_user_id": bot_user_id,
                 "enterprise_id": enterprise_id,
+                "slack_access_token": slack_access_token,
                 "issuer": "https://slack.com",
             }
 

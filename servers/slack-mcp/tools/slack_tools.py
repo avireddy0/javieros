@@ -27,9 +27,9 @@ def _get_slack_client() -> Optional[WebClient]:
     # Try session context first
     context = get_session_context()
     if context and context.auth_context:
-        access_token = context.auth_context.get("access_token")
-        if access_token:
-            return WebClient(token=access_token)
+        slack_token = context.auth_context.get("slack_access_token")
+        if slack_token:
+            return WebClient(token=slack_token)
 
     # Try to find session from store
     store = get_oauth21_session_store()
@@ -38,9 +38,9 @@ def _get_slack_client() -> Optional[WebClient]:
     if store._sessions:
         # Get first available session
         for session_key, session_info in store._sessions.items():
-            access_token = session_info.get("access_token")
-            if access_token:
-                return WebClient(token=access_token)
+            slack_token = session_info.get("slack_access_token")
+            if slack_token:
+                return WebClient(token=slack_token)
 
     return None
 

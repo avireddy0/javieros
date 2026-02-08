@@ -88,10 +88,35 @@ SLACK_SCOPES = [
 
 
 class DynamicClientStore:
-    """In-memory store for dynamically registered OAuth clients."""
+    """Store for dynamically registered OAuth clients with GCS FUSE persistence."""
+
+    PERSIST_PATH = os.getenv(
+        "DYNAMIC_CLIENTS_PATH",
+        "/app/store_creds/dynamic_clients.json",
+    )
 
     def __init__(self):
         self._clients: Dict[str, Dict[str, Any]] = {}
+        self._load()
+
+    def _load(self):
+        """Load client registrations from persistent storage."""
+        try:
+            if os.path.exists(self.PERSIST_PATH):
+                with open(self.PERSIST_PATH, "r") as f:
+                    self._clients = json.load(f)
+                logger.info(f"Loaded {len(self._clients)} dynamic client(s) from {self.PERSIST_PATH}")
+        except Exception as e:
+            logger.warning(f"Failed to load dynamic clients: {e}")
+
+    def _save(self):
+        """Save client registrations to persistent storage."""
+        try:
+            os.makedirs(os.path.dirname(self.PERSIST_PATH), exist_ok=True)
+            with open(self.PERSIST_PATH, "w") as f:
+                json.dump(self._clients, f, indent=2)
+        except Exception as e:
+            logger.warning(f"Failed to persist dynamic clients: {e}")
 
     def register_client(
         self,
@@ -120,6 +145,7 @@ class DynamicClientStore:
         }
 
         self._clients[client_id] = client_info
+        self._save()
         logger.info(f"Registered dynamic client: {client_id} ({client_name})")
         return client_info
 
@@ -138,12 +164,10 @@ class DynamicClientStore:
         if not client:
             return False
 
-        # Validate client secret if provided
         if client_secret is not None:
             if not hmac.compare_digest(client["client_secret"], client_secret):
                 return False
 
-        # Validate redirect URI if provided
         if redirect_uri is not None:
             if redirect_uri not in client["redirect_uris"]:
                 logger.error(
@@ -533,13 +557,14 @@ async def oauth2_callback(request: Request):
         # Generate our own authorization code for Open WebUI
         our_auth_code = secrets.token_urlsafe(32)
 
-        # Store authorization code
+        # Store authorization code with the Slack access token
         session_store.store_authorization_code(
             code=our_auth_code,
             user_id=user_id,
             team_id=team_id,
             scopes=scopes,
             code_challenge=code_challenge,
+            slack_access_token=access_token,
             expires_in_seconds=600,
         )
 
@@ -621,6 +646,7 @@ async def handle_authorization_code_grant(params: Dict[str, Any]) -> JSONRespons
     user_id = code_info["user_id"]
     team_id = code_info["team_id"]
     scopes = code_info["scopes"]
+    slack_access_token = code_info.get("slack_access_token")
 
     # Generate access token and refresh token
     access_token = secrets.token_urlsafe(32)
@@ -640,6 +666,7 @@ async def handle_authorization_code_grant(params: Dict[str, Any]) -> JSONRespons
         scopes=scopes,
         expiry=expiry,
         session_id=session_id,
+        slack_access_token=slack_access_token,
     )
 
     # Return token response

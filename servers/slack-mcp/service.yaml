@@ -31,7 +31,7 @@ spec:
             - name: SLACK_CREDS_BUCKET
               value: "slack-mcp-creds-flow-os"
             - name: SLACK_EXTERNAL_URL
-              value: "https://slack-mcp-210087613384.us-central1.run.app"
+              value: "https://slack-mcp-a4bmliuj7q-uc.a.run.app"
             - name: SLACK_OAUTH_CLIENT_ID
               valueFrom:
                 secretKeyRef:

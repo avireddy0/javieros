@@ -1,0 +1,28 @@
+# Upstream CVEs from Open WebUI base image (ghcr.io/open-webui/open-webui:main)
+# These are in transitive dependencies of the base image and cannot be fixed
+# by JavierOS. Monitor upstream for updates.
+# Last reviewed: 2026-02-08
+
+# aiohttp: zip bomb in auto_decompress (fixed in 3.13.3)
+CVE-2025-69223
+
+# azure-core: deserialization of untrusted data (fixed in 1.38.0)
+CVE-2026-21226
+
+# ecdsa: vulnerable to Minerva attack (no fix available)
+CVE-2024-23342
+
+# jaraco.context: path traversal via malicious tar archives (fixed in 6.1.0)
+CVE-2026-23949
+
+# protobuf: DoS due to recursion depth bypass (fixed in 6.33.5)
+CVE-2026-0994
+
+# pyasn1: DoS via memory exhaustion from malformed RELATIVE-OID (fixed in 0.6.2)
+CVE-2026-23490
+
+# python-multipart: arbitrary file write via path traversal (fixed in 0.0.22)
+CVE-2026-24486
+
+# wheel: privilege escalation via malicious wheel file (fixed in 0.46.2)
+CVE-2026-24049
