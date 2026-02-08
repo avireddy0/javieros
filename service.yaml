@@ -109,6 +109,16 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: whatsapp-api-token
+            - name: HSTS
+              value: "max-age=31536000;includeSubDomains"
+            - name: XFRAME_OPTIONS
+              value: "DENY"
+            - name: XCONTENT_TYPE
+              value: "nosniff"
+            - name: REFERRER_POLICY
+              value: "strict-origin-when-cross-origin"
+            - name: PERMISSIONS_POLICY
+              value: "camera=(),microphone=(),geolocation=()"
           startupProbe:
             httpGet:
               path: /health
