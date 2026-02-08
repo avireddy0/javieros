@@ -25,6 +25,7 @@ RUN chmod +x /app/start.sh
 COPY webui/custom.js /app/build/static/custom.js
 COPY webui/whatsapp_qr.py /app/backend/open_webui/routers/whatsapp_qr.py
 COPY webui/ide_hook.py /app/backend/open_webui/routers/ide_hook.py
+COPY webui/cron_proxy.py /app/backend/open_webui/routers/cron_proxy.py
 
 RUN python3 - <<'PY'
 from pathlib import Path
@@ -58,6 +59,12 @@ if "ide_hook" not in main_text:
             "    scim,\n    ide_hook,\n)",
         )
 
+if "cron_proxy" not in main_text:
+    main_text = main_text.replace(
+        "    ide_hook,\n)",
+        "    ide_hook,\n    cron_proxy,\n)",
+    )
+
 marker = "app.include_router(tools.router, prefix=\"/api/v1/tools\", tags=[\"tools\"])"
 if marker in main_text and "whatsapp_qr.router" not in main_text:
     main_text = main_text.replace(
@@ -72,11 +79,18 @@ if "ide_hook.router" not in main_text:
         marker + "\napp.include_router(ide_hook.router, tags=[\"ide\"])",
     )
 
+if "cron_proxy.router" not in main_text:
+    main_text = main_text.replace(
+        marker,
+        marker + "\napp.include_router(cron_proxy.router, prefix=\"/api/cron\", tags=[\"cron\"])",
+    )
+
 main_path.write_text(main_text)
 PY
 
 RUN grep -q 'whatsapp_qr.router' /app/backend/open_webui/main.py && \
-    grep -q 'ide_hook.router' /app/backend/open_webui/main.py || \
+    grep -q 'ide_hook.router' /app/backend/open_webui/main.py && \
+    grep -q 'cron_proxy.router' /app/backend/open_webui/main.py || \
     (echo "FATAL: Patch verification failed" && exit 1)
 
 CMD ["/app/start.sh"]

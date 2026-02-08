@@ -35,6 +35,8 @@ Only the following filenames are accepted (validated via regex whitelist):
 
 ## API Endpoints
 
+### Memory CRUD
+
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check (returns `{"status": "ok"}`) |
@@ -43,6 +45,18 @@ Only the following filenames are accepted (validated via regex whitelist):
 | `PUT` | `/files/{user_id}/{filename}` | Create or overwrite a memory file |
 | `POST` | `/files/{user_id}/{filename}/append` | Append content to a memory file |
 | `DELETE` | `/files/{user_id}/{filename}` | Delete a memory file |
+
+### Cron Jobs (Phase 1.2)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/cron/morning-briefing` | Generate daily morning briefing from USER.md, MEMORY.md, HEARTBEAT.md |
+| `POST` | `/cron/inbox-summary` | Summarize recent daily log entries |
+| `POST` | `/cron/weekly-report` | Generate weekly summary from past 7 DAILY_LOG files |
+
+Cron endpoints are authenticated separately via `CRON_TOKEN` (not `MEMORY_API_TOKEN`). They call the Open WebUI LLM API (`/api/chat/completions` on localhost:8080) to generate summaries, then store results in `DAILY_LOG_YYYY-MM-DD.md`.
+
+Cloud Scheduler sends requests to the main Cloud Run URL at `/api/cron/*`, which is proxied to the memory-service via `webui/cron_proxy.py`.
 
 ## Authentication
 
@@ -61,6 +75,11 @@ The token is validated using `hmac.compare_digest` for constant-time comparison 
 | `MEMORY_API_TOKEN` | Yes | Bearer token for API authentication (hard-fail if missing) |
 | `GCS_BUCKET_NAME` | No | GCS bucket name (default: `javieros-memory`) |
 | `MEMORY_ALLOWED_ORIGINS` | No | Comma-separated CORS origins (default: `*`) |
+| `CRON_TOKEN` | No | Bearer token for cron endpoint authentication (cron returns 503 if not set) |
+| `OPENWEBUI_BASE_URL` | No | Open WebUI base URL for LLM calls (default: `http://localhost:8080`) |
+| `OPENWEBUI_API_KEY` | No | Open WebUI API key for LLM calls (required for cron to function) |
+| `CRON_MODEL` | No | LLM model to use for cron summaries (default: `gpt-4o-mini`) |
+| `CRON_DEFAULT_USER` | No | Default user ID for cron jobs (default: `default`) |
 
 ## Security
 

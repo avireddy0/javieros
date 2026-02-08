@@ -99,6 +99,11 @@ spec:
             # MCP: Envision-MCP registered as native external tool
             - name: MCP_SERVER_CONFIG
               value: '{"envision":{"url":"https://envision-mcp-845049957105.us-central1.run.app/mcp","transport":"streamable-http"}}'
+            - name: CRON_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: cron-token
           startupProbe:
             httpGet:
               path: /health
@@ -207,6 +212,16 @@ spec:
                   name: memory-api-token
             - name: GCS_BUCKET_NAME
               value: "javieros-memory"
+            - name: CRON_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: cron-token
+            - name: OPENWEBUI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: open-webui-token-avi
           startupProbe:
             httpGet:
               path: /health
