@@ -121,6 +121,40 @@ async def qr_modal(user=Depends(get_verified_user)):
       const qrEl = document.getElementById('qr');
       const disconnectBtn = document.getElementById('disconnect-btn');
 
+      async function startSession() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          statusEl.textContent = 'Please log in first.';
+          statusEl.classList.add('error');
+          return false;
+        }
+
+        try {
+          const response = await fetch('/api/v1/whatsapp/start', {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + token }
+          });
+
+          if (response.status === 401) {
+            statusEl.textContent = 'Session expired. Please log in again.';
+            statusEl.classList.add('error');
+            return false;
+          }
+
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            console.error('Failed to start session:', data);
+            // Don't fail hard - the session might already be started
+          }
+
+          return true;
+        } catch (err) {
+          console.error('Failed to start session:', err);
+          // Don't fail hard - continue to try fetching QR
+          return true;
+        }
+      }
+
       async function fetchQr() {
         const token = localStorage.getItem('token');
         if (!token) {
@@ -220,6 +254,10 @@ async def qr_modal(user=Depends(get_verified_user)):
 
       async function loop() {
         try {
+          // Start the session first (no-op if already started)
+          const started = await startSession();
+          if (!started) return;
+
           await fetchQr();
           const connected = await pollStatus();
           if (connected) return;
@@ -243,6 +281,24 @@ async def qr_modal(user=Depends(get_verified_user)):
             "Expires": "0",
         },
     )
+
+
+@router.post("/start")
+async def start_whatsapp(req: Request, user=Depends(get_verified_user)):
+    token = WHATSAPP_API_TOKEN
+    if not token:
+        raise HTTPException(status_code=500, detail="WhatsApp API token not configured")
+    response = await _proxy_request(
+        "POST",
+        "/start",
+        token,
+        user_id=user.id,
+        timeout_seconds=AIOHTTP_CLIENT_TIMEOUT,
+    )
+    status_code, headers, content = response
+    if status_code >= 400:
+        raise HTTPException(status_code=status_code, detail=content.decode("utf-8"))
+    return Response(content=content, media_type=headers.get("content-type"))
 
 
 @router.get("/qr")
