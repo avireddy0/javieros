@@ -95,17 +95,17 @@ async def qr_modal(user=Depends(get_verified_user)):
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>WhatsApp QR</title>
     <style>
-      body {{ font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; background: #0b0f12; color: #f5f6f7; }}
-      .card {{ background: #141a1f; border-radius: 16px; padding: 20px; max-width: 420px; margin: 0 auto; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }}
-      h1 {{ font-size: 20px; margin: 0 0 12px; }}
-      p {{ margin: 0 0 16px; color: #b8c0c8; }}
-      img {{ width: 100%; border-radius: 12px; background: #0f1418; }}
-      .status {{ margin-top: 12px; font-size: 14px; color: #8fd19e; }}
-      .error {{ color: #ffb3b3; }}
-      .btn {{ display: inline-block; margin-top: 16px; padding: 10px 20px; background: #ff4757; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; text-decoration: none; }}
-      .btn:hover {{ background: #ff3838; }}
-      .btn:disabled {{ background: #555; cursor: not-allowed; }}
-      #disconnect-btn {{ display: none; }}
+      body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; background: #0b0f12; color: #f5f6f7; }
+      .card { background: #141a1f; border-radius: 16px; padding: 20px; max-width: 420px; margin: 0 auto; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+      h1 { font-size: 20px; margin: 0 0 12px; }
+      p { margin: 0 0 16px; color: #b8c0c8; }
+      img { width: 100%; border-radius: 12px; background: #0f1418; }
+      .status { margin-top: 12px; font-size: 14px; color: #8fd19e; }
+      .error { color: #ffb3b3; }
+      .btn { display: inline-block; margin-top: 16px; padding: 10px 20px; background: #ff4757; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; text-decoration: none; }
+      .btn:hover { background: #ff3838; }
+      .btn:disabled { background: #555; cursor: not-allowed; }
+      #disconnect-btn { display: none; }
     </style>
   </head>
   <body>
@@ -121,114 +121,114 @@ async def qr_modal(user=Depends(get_verified_user)):
       const qrEl = document.getElementById('qr');
       const disconnectBtn = document.getElementById('disconnect-btn');
 
-      async function fetchQr() {{
+      async function fetchQr() {
         const token = localStorage.getItem('token');
-        if (!token) {{
+        if (!token) {
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return;
-        }}
+        }
 
-        const response = await fetch('/api/v1/whatsapp/qr', {{
-          headers: {{ 'Authorization': 'Bearer ' + token }}
-        }});
+        const response = await fetch('/api/v1/whatsapp/qr', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
 
-        if (response.status === 401) {{
+        if (response.status === 401) {
           statusEl.textContent = 'Session expired. Please log in again.';
           statusEl.classList.add('error');
           return;
-        }}
+        }
 
         const contentType = response.headers.get('content-type') || '';
-        if (contentType.includes('image/')) {{
+        if (contentType.includes('image/')) {
           const blob = await response.blob();
           qrEl.src = URL.createObjectURL(blob);
           statusEl.textContent = 'Waiting for scan…';
           statusEl.classList.remove('error');
           return;
-        }}
+        }
         const data = await response.json();
         statusEl.textContent = data.message || 'Waiting for QR…';
         statusEl.classList.remove('error');
-      }}
+      }
 
-      async function pollStatus() {{
+      async function pollStatus() {
         const token = localStorage.getItem('token');
-        if (!token) {{
+        if (!token) {
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return false;
-        }}
+        }
 
-        const response = await fetch('/api/v1/whatsapp/status', {{
-          headers: {{ 'Authorization': 'Bearer ' + token }}
-        }});
+        const response = await fetch('/api/v1/whatsapp/status', {
+          headers: { 'Authorization': 'Bearer ' + token }
+        });
 
-        if (response.status === 401) {{
+        if (response.status === 401) {
           statusEl.textContent = 'Session expired. Please log in again.';
           statusEl.classList.add('error');
           return false;
-        }}
+        }
 
         const data = await response.json();
-        if (data.connected) {{
+        if (data.connected) {
           statusEl.textContent = 'Connected! You can close this window or disconnect below.';
           disconnectBtn.style.display = 'inline-block';
           return true;
-        }}
+        }
         return false;
-      }}
+      }
 
-      async function disconnect() {{
+      async function disconnect() {
         if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
 
         const token = localStorage.getItem('token');
-        if (!token) {{
+        if (!token) {
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return;
-        }}
+        }
 
         disconnectBtn.disabled = true;
-        try {{
-          const response = await fetch('/api/v1/whatsapp/disconnect', {{
+        try {
+          const response = await fetch('/api/v1/whatsapp/disconnect', {
             method: 'DELETE',
-            headers: {{ 'Authorization': 'Bearer ' + token }}
-          }});
+            headers: { 'Authorization': 'Bearer ' + token }
+          });
 
-          if (response.status === 401) {{
+          if (response.status === 401) {
             statusEl.textContent = 'Session expired. Please log in again.';
             statusEl.classList.add('error');
             disconnectBtn.disabled = false;
             return;
-          }}
+          }
 
-          if (response.ok) {{
+          if (response.ok) {
             statusEl.textContent = 'Disconnected. You can close this window.';
             disconnectBtn.style.display = 'none';
-          }} else {{
+          } else {
             statusEl.textContent = 'Failed to disconnect. Please try again.';
             statusEl.classList.add('error');
             disconnectBtn.disabled = false;
-          }}
-        }} catch (err) {{
+          }
+        } catch (err) {
           statusEl.textContent = 'Network error. Please try again.';
           statusEl.classList.add('error');
           disconnectBtn.disabled = false;
-        }}
-      }}
+        }
+      }
 
-      async function loop() {{
-        try {{
+      async function loop() {
+        try {
           await fetchQr();
           const connected = await pollStatus();
           if (connected) return;
           setTimeout(loop, 4000);
-        }} catch (err) {{
+        } catch (err) {
           statusEl.textContent = 'Unable to load QR. Please refresh.';
           statusEl.classList.add('error');
-        }}
-      }}
+        }
+      }
 
       loop();
     </script>
