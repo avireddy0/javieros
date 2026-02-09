@@ -122,9 +122,23 @@ async def qr_modal(user=Depends(get_verified_user)):
       const disconnectBtn = document.getElementById('disconnect-btn');
 
       async function fetchQr() {{
+        const token = localStorage.getItem('token');
+        if (!token) {{
+          statusEl.textContent = 'Please log in first.';
+          statusEl.classList.add('error');
+          return;
+        }}
+
         const response = await fetch('/api/v1/whatsapp/qr', {{
-          credentials: 'include'
+          headers: {{ 'Authorization': 'Bearer ' + token }}
         }});
+
+        if (response.status === 401) {{
+          statusEl.textContent = 'Session expired. Please log in again.';
+          statusEl.classList.add('error');
+          return;
+        }}
+
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('image/')) {{
           const blob = await response.blob();
@@ -139,9 +153,23 @@ async def qr_modal(user=Depends(get_verified_user)):
       }}
 
       async function pollStatus() {{
+        const token = localStorage.getItem('token');
+        if (!token) {{
+          statusEl.textContent = 'Please log in first.';
+          statusEl.classList.add('error');
+          return false;
+        }}
+
         const response = await fetch('/api/v1/whatsapp/status', {{
-          credentials: 'include'
+          headers: {{ 'Authorization': 'Bearer ' + token }}
         }});
+
+        if (response.status === 401) {{
+          statusEl.textContent = 'Session expired. Please log in again.';
+          statusEl.classList.add('error');
+          return false;
+        }}
+
         const data = await response.json();
         if (data.connected) {{
           statusEl.textContent = 'Connected! You can close this window or disconnect below.';
@@ -153,12 +181,28 @@ async def qr_modal(user=Depends(get_verified_user)):
 
       async function disconnect() {{
         if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
+
+        const token = localStorage.getItem('token');
+        if (!token) {{
+          statusEl.textContent = 'Please log in first.';
+          statusEl.classList.add('error');
+          return;
+        }}
+
         disconnectBtn.disabled = true;
         try {{
           const response = await fetch('/api/v1/whatsapp/disconnect', {{
             method: 'DELETE',
-            credentials: 'include'
+            headers: {{ 'Authorization': 'Bearer ' + token }}
           }});
+
+          if (response.status === 401) {{
+            statusEl.textContent = 'Session expired. Please log in again.';
+            statusEl.classList.add('error');
+            disconnectBtn.disabled = false;
+            return;
+          }}
+
           if (response.ok) {{
             statusEl.textContent = 'Disconnected. You can close this window.';
             disconnectBtn.style.display = 'none';
