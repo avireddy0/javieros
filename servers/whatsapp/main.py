@@ -100,6 +100,17 @@ def _extract_token(req: Request) -> str:
     return req.cookies.get(WHATSAPP_QR_COOKIE, "")
 
 
+def _extract_user_id(req: Request) -> str:
+    """Extract user ID from Open WebUI context."""
+    user_id = req.headers.get("X-User-ID", "")
+    if not user_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing X-User-ID header. User context required."
+        )
+    return user_id
+
+
 def _purge_qr_sessions() -> None:
     now = time.time()
     expired = [token for token, expires_at in _qr_sessions.items() if expires_at <= now]
@@ -121,8 +132,12 @@ def _require_api_auth(req: Request, *, allow_qr_session: bool = False) -> None:
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _bridge_headers() -> dict[str, str] | None:
-    return {"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN}
+def _bridge_headers(user_id: str | None = None) -> dict[str, str]:
+    """Build headers for bridge requests, including user context."""
+    headers = {"X-WhatsApp-Bridge-Token": BRIDGE_TOKEN}
+    if user_id:
+        headers["X-User-ID"] = user_id
+    return headers
 
 
 def _raise_bridge_error(exc: Exception) -> None:
@@ -159,13 +174,14 @@ async def _bridge_request(
     *,
     json_body: dict[str, Any] | None = None,
     timeout_seconds: float | None = None,
+    user_id: str | None = None,
 ) -> httpx.Response:
     client: httpx.AsyncClient = req.app.state.bridge_client
     url = f"{BRIDGE_URL}{path}"
     kwargs: dict[str, Any] = {
         "method": method,
         "url": url,
-        "headers": _bridge_headers(),
+        "headers": _bridge_headers(user_id),
         "json": json_body,
     }
     if timeout_seconds is not None:
@@ -199,7 +215,10 @@ async def health() -> dict[str, Any]:
 async def status(req: Request):
     """Check WhatsApp connection status and QR code availability."""
     _require_api_auth(req, allow_qr_session=True)
-    response = await _bridge_request(req, "GET", "/status", timeout_seconds=10.0)
+    user_id = _extract_user_id(req)
+    response = await _bridge_request(
+        req, "GET", "/status", timeout_seconds=10.0, user_id=user_id
+    )
     return response.json()
 
 
@@ -207,7 +226,10 @@ async def status(req: Request):
 async def get_qr(req: Request):
     """Get QR code for WhatsApp authentication."""
     _require_api_auth(req, allow_qr_session=True)
-    response = await _bridge_request(req, "GET", "/qr", timeout_seconds=60.0)
+    user_id = _extract_user_id(req)
+    response = await _bridge_request(
+        req, "GET", "/qr", timeout_seconds=60.0, user_id=user_id
+    )
     content_type = response.headers.get("content-type", "")
     if "image/" in content_type:
         return Response(
@@ -317,7 +339,7 @@ async def qr_modal(req: Request):
           statusEl.textContent = 'Unable to load QR. Please refresh.';
           statusEl.classList.add('error');
         }}
-      }}
+      }|
 
       loop();
     </script>
@@ -338,7 +360,10 @@ async def qr_modal(req: Request):
 async def start_client(req: Request):
     """Manually start the WhatsApp client initialization."""
     _require_api_auth(req)
-    response = await _bridge_request(req, "POST", "/start", timeout_seconds=10.0)
+    user_id = _extract_user_id(req)
+    response = await _bridge_request(
+        req, "POST", "/start", timeout_seconds=10.0, user_id=user_id
+    )
     return response.json()
 
 
@@ -346,12 +371,14 @@ async def start_client(req: Request):
 async def send_message(req: Request, body: SendMessageRequest):
     """Send a WhatsApp message to a phone number or group."""
     _require_api_auth(req)
+    user_id = _extract_user_id(req)
     response = await _bridge_request(
         req,
         "POST",
         "/send",
         json_body={"to": body.to, "message": body.message},
         timeout_seconds=30.0,
+        user_id=user_id,
     )
     return response.json()
 
@@ -360,11 +387,13 @@ async def send_message(req: Request, body: SendMessageRequest):
 async def get_messages(req: Request, body: GetMessagesRequest):
     """Get recent messages from a WhatsApp chat."""
     _require_api_auth(req)
+    user_id = _extract_user_id(req)
     response = await _bridge_request(
         req,
         "POST",
         "/messages",
         json_body={"chat_id": body.chat_id, "limit": body.limit},
         timeout_seconds=30.0,
+        user_id=user_id,
     )
     return response.json()
