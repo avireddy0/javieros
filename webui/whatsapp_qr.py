@@ -28,11 +28,14 @@ async def _proxy_request(
     method: str,
     path: str,
     token: str,
+    user_id: Optional[str] = None,
     json_payload: Optional[dict] = None,
     timeout_seconds: float = 15.0,
 ):
     url = f"{WHATSAPP_API_BASE_URL}{path}"
     headers = {"Authorization": f"Bearer {token}"}
+    if user_id:
+        headers["X-User-ID"] = user_id
     timeout = aiohttp.ClientTimeout(total=timeout_seconds)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.request(
@@ -50,6 +53,7 @@ async def create_qr_session(user=Depends(get_verified_user)):
         "POST",
         "/qr_session",
         WHATSAPP_API_TOKEN,
+        user_id=user.id,
         timeout_seconds=AIOHTTP_CLIENT_TIMEOUT,
     )
     status_code, _, content = response
@@ -98,6 +102,10 @@ async def qr_modal(user=Depends(get_verified_user)):
       img {{ width: 100%; border-radius: 12px; background: #0f1418; }}
       .status {{ margin-top: 12px; font-size: 14px; color: #8fd19e; }}
       .error {{ color: #ffb3b3; }}
+      .btn {{ display: inline-block; margin-top: 16px; padding: 10px 20px; background: #ff4757; color: #fff; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500; text-decoration: none; }}
+      .btn:hover {{ background: #ff3838; }}
+      .btn:disabled {{ background: #555; cursor: not-allowed; }}
+      #disconnect-btn {{ display: none; }}
     </style>
   </head>
   <body>
@@ -106,15 +114,17 @@ async def qr_modal(user=Depends(get_verified_user)):
       <p>Open WhatsApp on your phone and scan this code to connect.</p>
       <img id=\"qr\" alt=\"WhatsApp QR code\" />
       <div id=\"status\" class=\"status\">Loading QR…</div>
+      <button id=\"disconnect-btn\" class=\"btn\" onclick=\"disconnect()\">Disconnect WhatsApp</button>
     </div>
     <script>
       const statusEl = document.getElementById('status');
       const qrEl = document.getElementById('qr');
+      const disconnectBtn = document.getElementById('disconnect-btn');
 
       async function fetchQr() {{
-        const response = await fetch('/api/v1/whatsapp/qr', {
+        const response = await fetch('/api/v1/whatsapp/qr', {{
           credentials: 'include'
-        });
+        }});
         const contentType = response.headers.get('content-type') || '';
         if (contentType.includes('image/')) {{
           const blob = await response.blob();
@@ -129,15 +139,39 @@ async def qr_modal(user=Depends(get_verified_user)):
       }}
 
       async function pollStatus() {{
-        const response = await fetch('/api/v1/whatsapp/status', {
+        const response = await fetch('/api/v1/whatsapp/status', {{
           credentials: 'include'
-        });
+        }});
         const data = await response.json();
         if (data.connected) {{
-          statusEl.textContent = 'Connected! You can close this window.';
+          statusEl.textContent = 'Connected! You can close this window or disconnect below.';
+          disconnectBtn.style.display = 'inline-block';
           return true;
         }}
         return false;
+      }}
+
+      async function disconnect() {{
+        if (!confirm('Are you sure you want to disconnect WhatsApp?')) return;
+        disconnectBtn.disabled = true;
+        try {{
+          const response = await fetch('/api/v1/whatsapp/disconnect', {{
+            method: 'DELETE',
+            credentials: 'include'
+          }});
+          if (response.ok) {{
+            statusEl.textContent = 'Disconnected. You can close this window.';
+            disconnectBtn.style.display = 'none';
+          }} else {{
+            statusEl.textContent = 'Failed to disconnect. Please try again.';
+            statusEl.classList.add('error');
+            disconnectBtn.disabled = false;
+          }}
+        }} catch (err) {{
+          statusEl.textContent = 'Network error. Please try again.';
+          statusEl.classList.add('error');
+          disconnectBtn.disabled = false;
+        }}
       }}
 
       async function loop() {{
@@ -176,6 +210,7 @@ async def get_qr(req: Request, user=Depends(get_verified_user)):
         "GET",
         "/qr",
         token,
+        user_id=user.id,
         timeout_seconds=AIOHTTP_CLIENT_TIMEOUT,
     )
     status_code, headers, content = response
@@ -204,6 +239,25 @@ async def get_status(req: Request, user=Depends(get_verified_user)):
         "GET",
         "/status",
         token,
+        user_id=user.id,
+        timeout_seconds=AIOHTTP_CLIENT_TIMEOUT,
+    )
+    status_code, headers, content = response
+    if status_code >= 400:
+        raise HTTPException(status_code=status_code, detail=content.decode("utf-8"))
+    return Response(content=content, media_type=headers.get("content-type"))
+
+
+@router.delete("/disconnect")
+async def disconnect_whatsapp(req: Request, user=Depends(get_verified_user)):
+    token = WHATSAPP_API_TOKEN
+    if not token:
+        raise HTTPException(status_code=500, detail="WhatsApp API token not configured")
+    response = await _proxy_request(
+        "DELETE",
+        "/disconnect",
+        token,
+        user_id=user.id,
         timeout_seconds=AIOHTTP_CLIENT_TIMEOUT,
     )
     status_code, headers, content = response
