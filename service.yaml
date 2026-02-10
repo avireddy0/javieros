@@ -161,6 +161,8 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: whatsapp-allowed-emails
+            - name: WHATSAPP_PIPELINE_ENABLED
+              value: "true"
           startupProbe:
             tcpSocket:
               port: 9099
