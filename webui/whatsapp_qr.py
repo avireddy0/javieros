@@ -89,10 +89,10 @@ async def create_qr_session(user=Depends(get_verified_user)):
 async def qr_modal(user=Depends(get_verified_user)):
     html = """
 <!DOCTYPE html>
-<html lang=\"en\">
+<html lang="en">
   <head>
-    <meta charset=\"utf-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WhatsApp QR</title>
     <style>
       body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0; padding: 24px; background: #0b0f12; color: #f5f6f7; }
@@ -109,12 +109,12 @@ async def qr_modal(user=Depends(get_verified_user)):
     </style>
   </head>
   <body>
-    <div class=\"card\">
+    <div class="card">
       <h1>Scan WhatsApp QR</h1>
       <p>Open WhatsApp on your phone and scan this code to connect.</p>
-      <img id=\"qr\" alt=\"WhatsApp QR code\" />
-      <div id=\"status\" class=\"status\">Loading QR…</div>
-      <button id=\"disconnect-btn\" class=\"btn\" onclick=\"disconnect()\">Disconnect WhatsApp</button>
+      <img id="qr" alt="WhatsApp QR code" />
+      <div id="status" class="status">Loading QR...</div>
+      <button id="disconnect-btn" class="btn" onclick="disconnect()">Disconnect WhatsApp</button>
     </div>
     <script>
       const statusEl = document.getElementById('status');
@@ -122,18 +122,22 @@ async def qr_modal(user=Depends(get_verified_user)):
       const disconnectBtn = document.getElementById('disconnect-btn');
 
       async function startSession() {
+        console.log('[WA] startSession called');
         const token = localStorage.getItem('token');
         if (!token) {
+          console.error('[WA] No token in localStorage');
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return false;
         }
 
         try {
+          console.log('[WA] Calling /start...');
           const response = await fetch('/api/v1/whatsapp/start', {
             method: 'POST',
             headers: { 'Authorization': 'Bearer ' + token }
           });
+          console.log('[WA] /start response status:', response.status);
 
           if (response.status === 401) {
             statusEl.textContent = 'Session expired. Please log in again.';
@@ -143,29 +147,31 @@ async def qr_modal(user=Depends(get_verified_user)):
 
           if (!response.ok) {
             const data = await response.json().catch(() => ({}));
-            console.error('Failed to start session:', data);
-            // Don't fail hard - the session might already be started
+            console.error('[WA] Failed to start session:', data);
           }
 
           return true;
         } catch (err) {
-          console.error('Failed to start session:', err);
-          // Don't fail hard - continue to try fetching QR
+          console.error('[WA] startSession error:', err);
           return true;
         }
       }
 
       async function fetchQr() {
+        console.log('[WA] fetchQr called');
         const token = localStorage.getItem('token');
         if (!token) {
+          console.error('[WA] No token for fetchQr');
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return;
         }
 
+        console.log('[WA] Calling /qr...');
         const response = await fetch('/api/v1/whatsapp/qr', {
           headers: { 'Authorization': 'Bearer ' + token }
         });
+        console.log('[WA] /qr response status:', response.status);
 
         if (response.status === 401) {
           statusEl.textContent = 'Session expired. Please log in again.';
@@ -174,29 +180,37 @@ async def qr_modal(user=Depends(get_verified_user)):
         }
 
         const contentType = response.headers.get('content-type') || '';
+        console.log('[WA] /qr content-type:', contentType);
+
         if (contentType.includes('image/')) {
           const blob = await response.blob();
+          console.log('[WA] Got image blob, size:', blob.size);
           qrEl.src = URL.createObjectURL(blob);
-          statusEl.textContent = 'Waiting for scan…';
+          statusEl.textContent = 'Waiting for scan...';
           statusEl.classList.remove('error');
           return;
         }
         const data = await response.json();
-        statusEl.textContent = data.message || 'Waiting for QR…';
+        console.log('[WA] /qr JSON response:', data);
+        statusEl.textContent = data.message || 'Waiting for QR...';
         statusEl.classList.remove('error');
       }
 
       async function pollStatus() {
+        console.log('[WA] pollStatus called');
         const token = localStorage.getItem('token');
         if (!token) {
+          console.error('[WA] No token for pollStatus');
           statusEl.textContent = 'Please log in first.';
           statusEl.classList.add('error');
           return false;
         }
 
+        console.log('[WA] Calling /status...');
         const response = await fetch('/api/v1/whatsapp/status', {
           headers: { 'Authorization': 'Bearer ' + token }
         });
+        console.log('[WA] /status response status:', response.status);
 
         if (response.status === 401) {
           statusEl.textContent = 'Session expired. Please log in again.';
@@ -205,6 +219,7 @@ async def qr_modal(user=Depends(get_verified_user)):
         }
 
         const data = await response.json();
+        console.log('[WA] /status JSON response:', data);
         if (data.connected) {
           statusEl.textContent = 'Connected! You can close this window or disconnect below.';
           disconnectBtn.style.display = 'inline-block';
@@ -253,21 +268,30 @@ async def qr_modal(user=Depends(get_verified_user)):
       }
 
       async function loop() {
+        console.log('[WA] loop() starting');
         try {
-          // Start the session first (no-op if already started)
           const started = await startSession();
-          if (!started) return;
+          if (!started) {
+            console.log('[WA] startSession returned false, stopping');
+            return;
+          }
 
           await fetchQr();
           const connected = await pollStatus();
-          if (connected) return;
+          if (connected) {
+            console.log('[WA] Connected! Stopping loop.');
+            return;
+          }
+          console.log('[WA] Not connected yet, scheduling next poll in 4s');
           setTimeout(loop, 4000);
         } catch (err) {
+          console.error('[WA] loop() caught error:', err);
           statusEl.textContent = 'Unable to load QR. Please refresh.';
           statusEl.classList.add('error');
         }
       }
 
+      console.log('[WA] Script loaded, starting loop');
       loop();
     </script>
   </body>
