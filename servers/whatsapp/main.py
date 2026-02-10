@@ -488,8 +488,8 @@ async def get_messages(req: Request, body: GetMessagesRequest) -> dict[str, Any]
 
 
 # Root endpoint for Open WebUI verification compatibility
-# Open WebUI appears to POST to root during verification
-@app.post("/", include_in_schema=False)
+# Only GET returns OpenAPI spec - POST must fail so Open WebUI
+# skips MCP detection and uses OpenAPI verification path
 @app.get("/", include_in_schema=False)
 async def root():
     """Return OpenAPI spec at root for verification compatibility."""
