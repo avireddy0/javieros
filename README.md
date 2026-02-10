@@ -102,3 +102,4 @@ For external tools in production, also validate:
 - Primary executive assistant experience is native Open WebUI + OpenAI (GPT).
 - Pipelines remain in-repo for optional advanced workflows, but WhatsApp pipeline tools are disabled by default.
 - WhatsApp QR modal support is proxied by Open WebUI via `/api/v1/whatsapp/qr_session`.
+# Trigger redeploy Tue, Feb 10, 2026  2:10:08 PM
