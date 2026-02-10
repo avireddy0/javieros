@@ -181,6 +181,11 @@ def _is_valid_qr_session(token: str) -> bool:
 
 
 def _require_api_auth(req: Request, *, allow_qr_session: bool = False) -> None:
+    # Allow localhost requests without auth (sidecar trust within Cloud Run)
+    client_host = req.client.host if req.client else None
+    if client_host in ("127.0.0.1", "localhost", "::1"):
+        return
+
     provided = _extract_token(req)
     if hmac.compare_digest(provided, API_TOKEN):
         return
