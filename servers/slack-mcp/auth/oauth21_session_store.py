@@ -155,7 +155,19 @@ class OAuth21SessionStore:
     their own credentials.
     """
 
+    # Max entries per store to prevent memory exhaustion
+    MAX_SESSIONS = 1000
+    MAX_OAUTH_STATES = 500
+    MAX_AUTH_CODES = 500
+    MAX_DYNAMIC_CLIENTS = 50
+
     def __init__(self):
+        logger.warning(
+            "OAuth21SessionStore using in-memory storage. "
+            "Sessions will be lost on deploy and are not shared across instances. "
+            "Consider migrating to GCS/Firestore for production persistence."
+        )
+
         # Session storage: session_key -> session_info
         # session_key format: "slack_{team_id}_{user_id}"
         self._sessions: Dict[str, Dict[str, Any]] = {}
@@ -225,6 +237,8 @@ class OAuth21SessionStore:
 
         with self._lock:
             self._cleanup_expired_oauth_states_locked()
+            if len(self._oauth_states) >= self.MAX_OAUTH_STATES:
+                raise ValueError("Too many pending OAuth states — possible abuse")
             now = datetime.now(timezone.utc)
             expiry = now + timedelta(seconds=expires_in_seconds)
             self._oauth_states[state] = {
@@ -319,6 +333,8 @@ class OAuth21SessionStore:
             expires_in_seconds: Code expiration (default 10 minutes)
         """
         with self._lock:
+            if len(self._auth_codes) >= self.MAX_AUTH_CODES:
+                raise ValueError("Too many pending authorization codes — possible abuse")
             now = datetime.now(timezone.utc)
             expiry = now + timedelta(seconds=expires_in_seconds)
             self._auth_codes[code] = {

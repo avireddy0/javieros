@@ -65,6 +65,13 @@ def safe_print(text: str) -> None:
         print(text.encode("ascii", errors="replace").decode(), file=sys.stderr)
 
 
+# Registration security: only allow redirect URIs to known hosts
+ALLOWED_REDIRECT_HOSTS = [
+    h.strip()
+    for h in os.environ.get("ALLOWED_REDIRECT_HOSTS", "").split(",")
+    if h.strip()
+]
+
 # OAuth 2.1 scopes for Slack
 SLACK_SCOPES = [
     "channels:history",
@@ -348,6 +355,20 @@ async def register_client(request: Request):
     redirect_uris = body.get("redirect_uris")
     if not redirect_uris or not isinstance(redirect_uris, list):
         raise HTTPException(status_code=400, detail="redirect_uris required as array")
+
+    # Validate redirect URIs against allowed hosts
+    if not ALLOWED_REDIRECT_HOSTS:
+        raise HTTPException(
+            status_code=503,
+            detail="Client registration not configured (ALLOWED_REDIRECT_HOSTS unset)",
+        )
+    for uri in redirect_uris:
+        parsed = urlparse(uri)
+        if parsed.hostname not in ALLOWED_REDIRECT_HOSTS:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Redirect URI host not allowed: {parsed.hostname}",
+            )
 
     client_name = body.get("client_name")
     grant_types = body.get("grant_types")

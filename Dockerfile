@@ -35,4 +35,7 @@ RUN grep -q 'whatsapp_qr.router' /app/backend/open_webui/main.py && \
     grep -q 'oauth_user_id' /app/backend/open_webui/main.py || \
     (echo "FATAL: Patch verification failed" && exit 1)
 
+RUN useradd --create-home app && chown -R app:app /app
+USER app
+
 CMD ["/app/start.sh"]

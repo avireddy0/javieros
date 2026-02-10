@@ -61,6 +61,9 @@ spec:
               value: "true"
             - name: OPENAI_API_BASE_URL
               value: "http://localhost:9099"
+            # BUG-3: Pipelines sidecar detection
+            - name: PIPELINES_URLS
+              value: "http://localhost:9099"
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -96,9 +99,12 @@ spec:
               value: ""
             - name: WEBUI_URL
               value: "https://open-webui-210087613384.us-central1.run.app"
-            # MCP: Envision-MCP registered as native external tool
+            # MCP: Envision-MCP registered as native MCP tool
             - name: MCP_SERVER_CONFIG
               value: '{"envision":{"url":"https://envision-mcp-845049957105.us-central1.run.app/mcp","transport":"streamable-http"}}'
+            # BUG-1/BUG-2: External tool server connections (workspace, slack, whatsapp, messaging)
+            - name: TOOL_SERVER_CONNECTIONS
+              value: '[{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"mcp","url":"https://slack-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"openapi","url":"http://localhost:8000","path":"/openapi.json","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp","name":"WhatsApp Tools","description":"WhatsApp messaging and session controls."}},{"type":"openapi","url":"http://localhost:8005","path":"/openapi.json","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"messaging","name":"Messaging Bridges","description":"Telegram, Discord, and Teams messaging bridges."}}]'
             - name: CRON_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -205,7 +211,7 @@ spec:
                   key: latest
                   name: whatsapp-api-token
             - name: WHATSAPP_ALLOWED_ORIGINS
-              value: "https://open-webui-a4bmliuj7q-uc.a.run.app"
+              value: "https://open-webui-210087613384.us-central1.run.app"
           startupProbe:
             httpGet:
               path: /health
@@ -300,6 +306,8 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: teams-app-password
+            - name: MESSAGING_ALLOWED_ORIGINS
+              value: "https://open-webui-210087613384.us-central1.run.app"
           startupProbe:
             httpGet:
               path: /health

@@ -24,13 +24,6 @@ WHATSAPP_QR_COOKIE_SECURE = (
 router = APIRouter()
 
 
-def _extract_token(req: Request) -> Optional[str]:
-    auth_header = req.headers.get("authorization")
-    if auth_header and auth_header.lower().startswith("bearer "):
-        return auth_header.split(" ", 1)[1].strip()
-    return req.cookies.get(WHATSAPP_QR_COOKIE)
-
-
 async def _proxy_request(
     method: str,
     path: str,

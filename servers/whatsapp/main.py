@@ -35,8 +35,12 @@ if not API_TOKEN:
 _origins = [
     o.strip() for o in os.getenv("WHATSAPP_ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
-ALLOWED_ORIGINS = _origins or ["*"]
-ALLOW_CREDENTIALS = ALLOWED_ORIGINS != ["*"]
+if not _origins:
+    raise RuntimeError(
+        "WHATSAPP_ALLOWED_ORIGINS must be set (comma-separated list of allowed origins)"
+    )
+ALLOWED_ORIGINS = _origins
+ALLOW_CREDENTIALS = True
 
 
 @asynccontextmanager
@@ -114,8 +118,7 @@ def _require_api_auth(req: Request, *, allow_qr_session: bool = False) -> None:
         return
     if allow_qr_session and _is_valid_qr_session(provided):
         return
-    if provided != API_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _bridge_headers() -> dict[str, str] | None:

@@ -7,3 +7,6 @@ COPY tools/ /app/pipelines/tools/
 COPY anthropic_pipeline.py /app/pipelines/anthropic_pipeline.py
 COPY gemini_pipeline.py /app/pipelines/gemini_pipeline.py
 COPY dlp_filter.py /app/pipelines/dlp_filter.py
+
+RUN useradd --create-home app && chown -R app:app /app
+USER app

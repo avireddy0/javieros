@@ -24,7 +24,7 @@ All components successfully created and deployed to Google Cloud Run.
 
 #### Cloud Run Service
 - **Name**: `slack-mcp`
-- **URL**: https://slack-mcp-a4bmliuj7q-uc.a.run.app
+- **URL**: https://slack-mcp-210087613384.us-central1.run.app
 - **Status**: Ready ✅
 - **Region**: us-central1
 - **Project**: flow-os-1769675656
@@ -89,7 +89,7 @@ All components successfully created and deployed to Google Cloud Run.
 1. Navigate to **OAuth & Permissions**
 2. Under **Redirect URLs**, add:
    ```
-   https://slack-mcp-a4bmliuj7q-uc.a.run.app/oauth2callback
+   https://slack-mcp-210087613384.us-central1.run.app/oauth2callback
    ```
 3. Under **Scopes** → **Bot Token Scopes**, add:
    - `channels:read`
@@ -135,7 +135,7 @@ gcloud run services replace service.yaml --project=flow-os-1769675656 --region=u
 ## 📝 Usage Examples
 
 ### Test OAuth Flow
-1. Visit: https://slack-mcp-a4bmliuj7q-uc.a.run.app/authorize?user_id=test_user
+1. Visit: https://slack-mcp-210087613384.us-central1.run.app/authorize?user_id=test_user
 2. Approve access on Slack
 3. You'll be redirected back with success message
 4. Token saved to: `gs://slack-mcp-creds-flow-os/slack-tokens/test_user.json`
@@ -146,7 +146,7 @@ gcloud run services replace service.yaml --project=flow-os-1769675656 --region=u
 API_TOKEN=$(gcloud secrets versions access latest --secret=slack-mcp-api-token --project=flow-os-1769675656)
 
 # Send message
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/send_message \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/send_message \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -158,7 +158,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/send_message \
 
 ### List Channels
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/list_channels \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/list_channels \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -169,7 +169,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/list_channels \
 
 ### Search Messages
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/search_messages \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/search_messages \
   -H "Authorization: Bearer $API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -185,7 +185,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/search_messages \
 
 ### Health Check
 ```bash
-curl https://slack-mcp-a4bmliuj7q-uc.a.run.app/health
+curl https://slack-mcp-210087613384.us-central1.run.app/health
 ```
 **Expected Response**:
 ```json
@@ -199,7 +199,7 @@ gcloud run services describe slack-mcp \
   --region=us-central1 \
   --format="value(status.url,status.conditions[0].status)"
 ```
-**Expected**: `https://slack-mcp-a4bmliuj7q-uc.a.run.app True`
+**Expected**: `https://slack-mcp-210087613384.us-central1.run.app True`
 
 ---
 
@@ -289,7 +289,7 @@ gcloud run services update-traffic slack-mcp \
 ## 🎯 Next Actions Required
 
 1. **Create Slack App** at https://api.slack.com/apps
-2. **Configure redirect URL**: `https://slack-mcp-a4bmliuj7q-uc.a.run.app/oauth2callback`
+2. **Configure redirect URL**: `https://slack-mcp-210087613384.us-central1.run.app/oauth2callback`
 3. **Add OAuth scopes** (see Step 2 above)
 4. **Update secrets** with real Client ID and Client Secret
 5. **Test OAuth flow** by visiting `/authorize?user_id=YOUR_USER_ID`
@@ -301,7 +301,7 @@ gcloud run services update-traffic slack-mcp \
 
 ### Issue: OAuth fails with "invalid redirect_uri"
 **Solution**: Ensure redirect URL in Slack app exactly matches:
-`https://slack-mcp-a4bmliuj7q-uc.a.run.app/oauth2callback`
+`https://slack-mcp-210087613384.us-central1.run.app/oauth2callback`
 
 ### Issue: Tool calls return 401 Unauthorized
 **Solution**: Check that you're passing the correct API token in the `Authorization: Bearer` header

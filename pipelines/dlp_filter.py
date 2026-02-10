@@ -265,6 +265,7 @@ class Pipeline:
                 )
                 redacted_text = deidentify_response.item.value
 
+            self._consecutive_dlp_failures = 0  # Reset on success
             return {
                 "has_findings": has_findings,
                 "findings": findings,
@@ -272,10 +273,33 @@ class Pipeline:
             }
 
         except Exception as exc:
-            # Circuit breaker: if DLP API fails, pass through with warning
+            self._consecutive_dlp_failures = getattr(
+                self, "_consecutive_dlp_failures", 0
+            ) + 1
             logger.warning(
-                "DLP API call failed (passing through): %s", exc, exc_info=True
+                "DLP API call failed (attempt %d): %s",
+                self._consecutive_dlp_failures,
+                exc,
+                exc_info=True,
             )
+            # Fail closed after 3 consecutive failures
+            if self._consecutive_dlp_failures >= 3:
+                logger.error(
+                    "DLP API unavailable (%d consecutive failures) — blocking message",
+                    self._consecutive_dlp_failures,
+                )
+                return {
+                    "has_findings": True,
+                    "findings": [
+                        {
+                            "info_type": "DLP_UNAVAILABLE",
+                            "likelihood": "VERY_LIKELY",
+                            "quote": "[DLP scan unavailable — message blocked for safety]",
+                        }
+                    ],
+                    "redacted_text": "[Message blocked: DLP service unavailable]",
+                }
+            # Allow pass-through for transient failures (1-2 consecutive)
             return {"has_findings": False, "findings": [], "redacted_text": None}
 
     def _log_findings(

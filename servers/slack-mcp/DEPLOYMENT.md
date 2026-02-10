@@ -9,7 +9,7 @@
 - **Service Name**: slack-mcp
 - **Project**: flow-os-1769675656
 - **Region**: us-central1
-- **Service URL**: https://slack-mcp-a4bmliuj7q-uc.a.run.app
+- **Service URL**: https://slack-mcp-210087613384.us-central1.run.app
 - **Service Account**: 210087613384-compute@developer.gserviceaccount.com
 
 ### Container Image
@@ -53,7 +53,7 @@
 
 ### Health Check
 ```bash
-curl https://slack-mcp-a4bmliuj7q-uc.a.run.app/health
+curl https://slack-mcp-210087613384.us-central1.run.app/health
 # Expected: {"status":"healthy","service":"slack-mcp"}
 ```
 
@@ -70,7 +70,7 @@ Before the service can be used for Slack operations:
 ### 1. Create/Configure Slack App
 1. Go to https://api.slack.com/apps
 2. Create new app or select existing
-3. Add redirect URL: `https://slack-mcp-a4bmliuj7q-uc.a.run.app/oauth2callback`
+3. Add redirect URL: `https://slack-mcp-210087613384.us-central1.run.app/oauth2callback`
 4. Add required scopes (see README.md)
 5. Copy Client ID and Client Secret
 

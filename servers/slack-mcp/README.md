@@ -6,7 +6,7 @@ FastAPI-based MCP server implementing Slack OAuth 2.1 flow with GCS token storag
 
 - **Project**: flow-os-1769675656
 - **Region**: us-central1
-- **Service URL**: https://slack-mcp-a4bmliuj7q-uc.a.run.app
+- **Service URL**: https://slack-mcp-210087613384.us-central1.run.app
 - **Image**: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/slack-mcp:v1
 - **GCS Bucket**: gs://slack-mcp-creds-flow-os
 
@@ -19,7 +19,7 @@ FastAPI-based MCP server implementing Slack OAuth 2.1 flow with GCS token storag
 3. Navigate to **OAuth & Permissions**
 4. Add the following **Redirect URL**:
    ```
-   https://slack-mcp-a4bmliuj7q-uc.a.run.app/oauth2callback
+   https://slack-mcp-210087613384.us-central1.run.app/oauth2callback
    ```
 5. Add the following **Bot Token Scopes**:
    - `channels:read`
@@ -68,7 +68,7 @@ gcloud run services replace service.yaml --project=flow-os-1769675656 --region=u
 
 1. **Start Authorization**:
    ```
-   GET https://slack-mcp-a4bmliuj7q-uc.a.run.app/authorize?user_id=YOUR_USER_ID
+   GET https://slack-mcp-210087613384.us-central1.run.app/authorize?user_id=YOUR_USER_ID
    ```
    - Redirects to Slack OAuth page
    - User approves and is redirected back to `/oauth2callback`
@@ -77,7 +77,7 @@ gcloud run services replace service.yaml --project=flow-os-1769675656 --region=u
 2. **Check Auth Status**:
    ```bash
    curl -H "Authorization: Bearer YOUR_API_TOKEN" \
-     "https://slack-mcp-a4bmliuj7q-uc.a.run.app/auth_status?user_id=YOUR_USER_ID"
+     "https://slack-mcp-210087613384.us-central1.run.app/auth_status?user_id=YOUR_USER_ID"
    ```
 
 ### MCP Tools
@@ -88,7 +88,7 @@ All tool endpoints require:
 
 #### Send Message
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/send_message \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/send_message \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -100,7 +100,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/send_message \
 
 #### List Channels
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/list_channels \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/list_channels \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -112,7 +112,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/list_channels \
 
 #### Search Messages
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/search_messages \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/search_messages \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -124,7 +124,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/search_messages \
 
 #### Get Users
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/get_users \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/get_users \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -135,7 +135,7 @@ curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/get_users \
 
 #### Get Channel History
 ```bash
-curl -X POST https://slack-mcp-a4bmliuj7q-uc.a.run.app/get_channel_history \
+curl -X POST https://slack-mcp-210087613384.us-central1.run.app/get_channel_history \
   -H "Authorization: Bearer YOUR_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{

@@ -53,7 +53,7 @@ ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.environ.get(
         "MEMORY_ALLOWED_ORIGINS",
-        "https://open-webui-a4bmliuj7q-uc.a.run.app",
+        "https://open-webui-210087613384.us-central1.run.app",
     ).split(",")
     if origin.strip()
 ]

@@ -20,7 +20,7 @@ spec:
       serviceAccountName: open-webui-sa@flow-os-1769675656.iam.gserviceaccount.com
       containers:
         - name: slack-mcp
-          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/slack-mcp:v4-oauth-fix
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/slack-mcp:v5-security-fix
           ports:
             - containerPort: 8080
           resources:
@@ -31,7 +31,7 @@ spec:
             - name: SLACK_CREDS_BUCKET
               value: "slack-mcp-creds-flow-os"
             - name: SLACK_EXTERNAL_URL
-              value: "https://slack-mcp-a4bmliuj7q-uc.a.run.app"
+              value: "https://slack-mcp-210087613384.us-central1.run.app"
             - name: SLACK_OAUTH_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -42,6 +42,8 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: slack-oauth-client-secret
+            - name: ALLOWED_REDIRECT_HOSTS
+              value: "open-webui-210087613384.us-central1.run.app"
           volumeMounts:
             - name: creds-volume
               mountPath: /app/store_creds

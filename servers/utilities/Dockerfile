@@ -10,4 +10,7 @@ COPY main.py .
 ENV PORT=8080
 EXPOSE 8080
 
+RUN useradd --create-home app && chown -R app:app /app
+USER app
+
 CMD ["python", "main.py"]

@@ -6,8 +6,10 @@ Normalizes incoming messages and routes them to Open WebUI for AI processing.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import time
@@ -113,7 +115,9 @@ def _check_rate_limit(key: str) -> None:
 
 def _verify_api_token(token: str | None) -> None:
     if not MESSAGING_API_TOKEN:
-        return  # Token not configured — skip auth (dev mode)
+        raise HTTPException(
+            status_code=503, detail="Messaging authentication not configured"
+        )
     if not token or not hmac.compare_digest(token, MESSAGING_API_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid API token")
 
@@ -283,9 +287,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+_messaging_origins = [
+    o.strip()
+    for o in os.environ.get("MESSAGING_ALLOWED_ORIGINS", OPENWEBUI_BASE_URL).split(",")
+    if o.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_messaging_origins,
+    allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
@@ -438,9 +448,38 @@ async def teams_webhook(
 ) -> dict[str, Any]:
     _check_rate_limit("teams")
 
-    # Basic JWT presence check — full validation requires JWKS fetching
-    if not authorization and TEAMS_APP_ID:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    # Validate Teams Bot Framework JWT claims
+    if TEAMS_APP_ID:
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Missing Authorization header")
+        token = authorization.replace("Bearer ", "").strip()
+        try:
+            # Decode JWT payload (header.payload.signature)
+            parts = token.split(".")
+            if len(parts) != 3:
+                raise ValueError("Malformed JWT")
+            payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            # Validate audience matches our app ID
+            aud = payload.get("aud", "")
+            if aud != TEAMS_APP_ID:
+                raise ValueError(f"Invalid audience: {aud}")
+            # Validate issuer is Bot Framework or Azure AD
+            iss = payload.get("iss", "")
+            valid_issuers = (
+                "https://api.botframework.com",
+                "https://sts.windows.net/",
+                "https://login.microsoftonline.com/",
+            )
+            if not any(iss.startswith(vi) for vi in valid_issuers):
+                raise ValueError(f"Invalid issuer: {iss}")
+            # Validate token is not expired
+            exp = payload.get("exp", 0)
+            if time.time() > exp:
+                raise ValueError("Token expired")
+        except (ValueError, KeyError, json.JSONDecodeError) as exc:
+            logger.warning("Teams JWT validation failed: %s", exc)
+            raise HTTPException(status_code=401, detail="Invalid authorization token")
 
     body = await request.json()
     activity_type = body.get("type", "")
