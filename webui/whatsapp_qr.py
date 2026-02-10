@@ -42,7 +42,9 @@ async def _proxy_request(
             method, url, headers=headers, json=json_payload
         ) as resp:
             content = await resp.read()
-            return resp.status, dict(resp.headers), content
+            # Normalize header keys to lowercase for consistent access
+            normalized_headers = {k.lower(): v for k, v in resp.headers.items()}
+            return resp.status, normalized_headers, content
 
 
 @router.post("/qr_session")
@@ -341,17 +343,19 @@ async def get_qr(req: Request, user=Depends(get_verified_user)):
     if status_code >= 400:
         raise HTTPException(status_code=status_code, detail=content.decode("utf-8"))
     content_type = headers.get("content-type", "")
-    if "image/" in content_type:
+    # Check for image content-type OR PNG magic bytes (fallback if header is wrong)
+    is_png = content[:8] == b'\x89PNG\r\n\x1a\n' if len(content) >= 8 else False
+    if "image/" in content_type or is_png:
         return Response(
             content=content,
-            media_type=content_type,
+            media_type="image/png" if is_png else content_type,
             headers={
                 "Cache-Control": "no-store, max-age=0",
                 "Pragma": "no-cache",
                 "Expires": "0",
             },
         )
-    return Response(content=content, media_type=content_type)
+    return Response(content=content, media_type=content_type or "application/json")
 
 
 @router.get("/status")
