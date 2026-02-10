@@ -100,15 +100,29 @@ def _extract_token(req: Request) -> str:
     return req.cookies.get(WHATSAPP_QR_COOKIE, "")
 
 
-def _extract_user_id(req: Request) -> str:
-    """Extract user ID from Open WebUI context."""
+def _extract_user_id(req: Request, required: bool = False) -> str:
+    """Extract user ID from Open WebUI context.
+
+    For tool server calls (external tools), the X-User-ID header may not be present.
+    In that case, use a default session ID based on the API token hash to maintain
+    session isolation while still allowing tool server access.
+    """
     user_id = req.headers.get("X-User-ID", "")
-    if not user_id:
+    if user_id:
+        return user_id
+    if required:
         raise HTTPException(
             status_code=401,
             detail="Missing X-User-ID header. User context required."
         )
-    return user_id
+    # For tool server calls without user context, derive a session ID from the token
+    # This ensures all tool server calls share the same WhatsApp session
+    token = _extract_token(req)
+    if token:
+        # Use first 16 chars of token hash as default user ID
+        import hashlib
+        return f"toolserver-{hashlib.sha256(token.encode()).hexdigest()[:16]}"
+    return "toolserver-default"
 
 
 def _purge_qr_sessions() -> None:
