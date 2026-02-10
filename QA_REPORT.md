@@ -1,7 +1,7 @@
 # JavierOS QA Report
 
 **Initial Date**: 2026-02-07
-**Last Updated**: 2026-02-09
+**Last Updated**: 2026-02-10
 **Tester**: Automated QA via Playwright MCP + curl verification
 **Environment**: Production (Cloud Run)
 **App URL**: `https://open-webui-210087613384.us-central1.run.app`
@@ -280,6 +280,8 @@ Post-remediation verification via curl-based testing:
 | `cf635ad` | P2/P3 fixes — OIDC validation and dead code cleanup |
 | `59c8f4f` | Functional bugs — pipelines detection + tool server URLs |
 | `eb3874f` | Production hardening — .dockerignore, non-root user, CORS origins |
+| `14f0f11` | Pin base images — open-webui dev digest + pipelines digest |
+| `565e239` | Dockerfile formatting cleanup |
 
 ### Remaining Manual Actions
 
@@ -301,6 +303,8 @@ Post-remediation hardening based on comprehensive codebase audit:
 | Stale .env.example URL | Updated Slack MCP URL from old `a4bmliuj7q` format | Already fixed in `3796bcc` |
 | Codebase cleanliness | No TODOs, FIXMEs, dead imports, or stale references found | CLEAN |
 | Localhost abstraction | All localhost URLs properly wrapped in env vars with defaults | CLEAN |
+| Base image pinning | Pinned `open-webui` and `pipelines` Dockerfiles to immutable digests — prevents upstream `:dev`/`:main` tag breakage | FIXED |
+| pytz safety net | Added `pip install pytz` to open-webui Dockerfile — upstream regression protection | FIXED |
 
 ### Production Health Verification (10/10 PASS)
 
@@ -341,3 +345,4 @@ Post-remediation hardening based on comprehensive codebase audit:
 
 *Initial report generated 2026-02-07 via automated Playwright MCP testing.*
 *Updated 2026-02-09 with forensic security audit, functional bug fixes, and production hardening.*
+*Updated 2026-02-10 with Dockerfile base image pinning (rev 107 pytz crash, rev 109 schema mismatch).*

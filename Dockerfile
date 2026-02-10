@@ -1,4 +1,8 @@
-FROM ghcr.io/open-webui/open-webui:dev
+# Pin to open-webui:dev as of 2026-02-09 (v0.7.2, matches production DB schema)
+FROM ghcr.io/open-webui/open-webui@sha256:dbf2780d1b41be1a9ed2155a73db7eadfe991a9f6d8f7d67b4e525eb36c30fb2
+
+# Safety net: upstream briefly dropped pytz from dev image
+RUN pip install --no-cache-dir pytz==2025.2
 
 ENV WEBUI_AUTH=true \
     ENABLE_OPENAI_API=true \
