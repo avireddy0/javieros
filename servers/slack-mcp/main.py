@@ -1565,6 +1565,48 @@ async def root(request: Request):
 
 
 # =============================================================================
+# Root MCP Forward (Open WebUI OAuth 2.1 compatibility)
+# =============================================================================
+
+
+@server.custom_route("/", methods=["POST"])
+async def root_mcp_forward(request: Request):
+    """
+    Forward POST requests from root to /mcp endpoint.
+    
+    Open WebUI with OAuth 2.1 MCP servers ignores the 'path' parameter
+    and POSTs to the root URL instead of /mcp. This forwards those requests.
+    """
+    import httpx
+    
+    body = await request.body()
+    port = int(os.getenv("PORT", "8080"))
+    
+    # Forward all headers except host
+    headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"http://localhost:{port}/mcp",
+                content=body,
+                headers=headers,
+                timeout=60.0,
+            )
+            
+            from starlette.responses import Response
+            return Response(
+                content=response.content,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.headers.get("content-type"),
+            )
+        except Exception as e:
+            logger.error(f"Error forwarding to /mcp: {e}")
+            raise HTTPException(status_code=502, detail=f"MCP forward failed: {e}")
+
+
+# =============================================================================
 # Main Entry Point
 # =============================================================================
 
