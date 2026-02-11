@@ -2,9 +2,10 @@
 FastMCP Slack Tools.
 
 Registers Slack operations as MCP tools using the @server.tool() decorator.
-These tools get the authenticated Slack client from the session context.
+These tools get the authenticated Slack client from the session context or Bearer token.
 """
 
+import hmac
 import logging
 from typing import Optional
 
@@ -17,31 +18,88 @@ from auth.oauth21_session_store import get_oauth21_session_store, get_session_co
 logger = logging.getLogger(__name__)
 
 
+def _get_slack_client_from_bearer_token() -> Optional[WebClient]:
+    """
+    Get authenticated Slack WebClient from Bearer token in current request.
+
+    Uses FastMCP's dependency injection to access HTTP headers.
+
+    Returns:
+        WebClient if Bearer token found and valid, None otherwise
+    """
+    try:
+        # Try to import FastMCP's request dependencies
+        from fastmcp.server.dependencies import get_http_request
+
+        # Get the current HTTP request
+        request = get_http_request()
+        if not request:
+            return None
+
+        # Extract Authorization header
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return None
+
+        token = auth_header[7:]  # Remove "Bearer " prefix
+
+        # Look up session by access token
+        session_store = get_oauth21_session_store()
+        for session_key, session_info in session_store._sessions.items():
+            stored_token = session_info.get("access_token", "")
+            if stored_token and hmac.compare_digest(stored_token, token):
+                slack_token = session_info.get("slack_access_token")
+                if slack_token:
+                    logger.debug(f"Found Slack token via Bearer auth for session {session_key}")
+                    return WebClient(token=slack_token)
+
+        logger.debug("Bearer token provided but no matching session found")
+        return None
+
+    except ImportError:
+        logger.debug("FastMCP dependencies not available, skipping Bearer token auth")
+        return None
+    except Exception as e:
+        logger.debug(f"Error getting Slack client from Bearer token: {e}")
+        return None
+
+
 def _get_slack_client() -> Optional[WebClient]:
     """
-    Get authenticated Slack WebClient from session context.
+    Get authenticated Slack WebClient from session context or Bearer token.
+
+    Tries multiple authentication methods in order:
+    1. Session context (set during OAuth callback)
+    2. Bearer token from current HTTP request
+    3. Any available session in the store (fallback for testing)
 
     Returns:
         WebClient if authenticated, None otherwise
     """
-    # Try session context first
+    # Try session context first (set during OAuth flow)
     context = get_session_context()
     if context and context.auth_context:
         slack_token = context.auth_context.get("slack_access_token")
         if slack_token:
+            logger.debug("Using Slack token from session context")
             return WebClient(token=slack_token)
 
-    # Try to find session from store
-    store = get_oauth21_session_store()
+    # Try Bearer token from current HTTP request
+    client = _get_slack_client_from_bearer_token()
+    if client:
+        return client
 
-    # Check if we have any session (for testing/debugging)
+    # Try to find session from store (fallback)
+    store = get_oauth21_session_store()
     if store._sessions:
-        # Get first available session
+        # Get first available session with a Slack token
         for session_key, session_info in store._sessions.items():
             slack_token = session_info.get("slack_access_token")
             if slack_token:
+                logger.debug(f"Using Slack token from fallback session {session_key}")
                 return WebClient(token=slack_token)
 
+    logger.debug("No Slack authentication found")
     return None
 
 
