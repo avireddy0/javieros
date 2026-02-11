@@ -78,25 +78,31 @@ def _get_slack_client() -> Optional[WebClient]:
     """
     # Try session context first (set during OAuth flow)
     context = get_session_context()
+    logger.info(f"[AUTH] Session context check: context={context is not None}")
     if context and context.auth_context:
         slack_token = context.auth_context.get("slack_access_token")
         if slack_token:
-            logger.debug("Using Slack token from session context")
+            logger.info("[AUTH] Using Slack token from session context")
             return WebClient(token=slack_token)
 
     # Try Bearer token from current HTTP request
+    logger.info("[AUTH] Trying Bearer token auth...")
     client = _get_slack_client_from_bearer_token()
     if client:
+        logger.info("[AUTH] Got client from Bearer token")
         return client
 
     # Try to find session from store (fallback)
     store = get_oauth21_session_store()
+    session_count = len(store._sessions) if store._sessions else 0
+    logger.info(f"[AUTH] Fallback: checking {session_count} sessions in store")
     if store._sessions:
         # Get first available session with a Slack token
         for session_key, session_info in store._sessions.items():
             slack_token = session_info.get("slack_access_token")
+            logger.info(f"[AUTH] Session {session_key}: has_slack_token={slack_token is not None}")
             if slack_token:
-                logger.debug(f"Using Slack token from fallback session {session_key}")
+                logger.info(f"[AUTH] Using Slack token from fallback session {session_key}")
                 return WebClient(token=slack_token)
 
     logger.debug("No Slack authentication found")
