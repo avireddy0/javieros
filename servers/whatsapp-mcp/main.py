@@ -72,9 +72,7 @@ async def get_whatsapp_messages(ctx: Context, chat_id: Annotated[str, Field(desc
         msgs = r.get("messages", [])
         if not msgs: return "No messages found."
         lines = [f"[{'You' if m.get('from_me') else m.get('sender', '?')}]: {m.get('text', m.get('body', ''))}" for m in msgs]
-        return f"Messages ({len(msgs)}):
-" + "
-".join(lines)
+        return "Messages (" + str(len(msgs)) + "):" + chr(10) + chr(10).join(lines)
     return str(r)
 
 @mcp.tool()
