@@ -35,10 +35,12 @@ jobs:
           docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/pipelines:latest ./pipelines
           docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-bridge:latest ./whatsapp-bridge
           docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-api:latest ./servers/whatsapp
+          docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-mcp:latest ./servers/whatsapp-mcp
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/open-webui:latest
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/pipelines:latest
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-bridge:latest
           docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-api:latest
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/$REPO/whatsapp-mcp:latest
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
