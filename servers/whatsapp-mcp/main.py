@@ -130,29 +130,19 @@ async def disconnect_whatsapp(ctx: Context) -> str:
 
 if __name__ == '__main__':
     import uvicorn
-    from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
-    from starlette.routing import Route
+    from starlette.routing import Route, Mount
     from starlette.responses import JSONResponse
-    
-    sse = SseServerTransport('/messages')
-    
-    async def handle_sse(req):
-        async with sse.connect_sse(req.scope, req.receive, req._send) as s:
-            await mcp._mcp_server.run(s[0], s[1], mcp._mcp_server.create_initialization_options())
-    
-    async def handle_msg(req): 
-        await sse.handle_post_message(req.scope, req.receive, req._send)
-    
+
     async def handle_health(req):
         return JSONResponse({'status': 'ok'})
-    
+
+    # Use FastMCP's built-in streamable-http transport
     app = Starlette(routes=[
         Route('/health', endpoint=handle_health),
-        Route('/sse', endpoint=handle_sse),
-        Route('/messages', endpoint=handle_msg, methods=['POST']),
+        Mount('/mcp', app=mcp.streamable_http_app()),
     ])
-    
+
     port = int(os.getenv('PORT', '8001'))
     logger.info(f'WhatsApp MCP on port {port}')
     uvicorn.run(app, host='0.0.0.0', port=port)
