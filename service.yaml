@@ -104,7 +104,7 @@ spec:
               value: '{"envision":{"url":"https://envision-mcp-845049957105.us-central1.run.app/mcp","transport":"streamable-http"}}'
             # BUG-1/BUG-2: External tool server connections (workspace, slack, whatsapp, messaging)
             - name: TOOL_SERVER_CONNECTIONS
-              value: '[{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"mcp","url":"https://slack-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"openapi","url":"http://localhost:8000","path":"/openapi.json","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp","name":"WhatsApp Tools","description":"WhatsApp messaging and session controls."}},{"type":"openapi","url":"http://localhost:8005","path":"/openapi.json","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"messaging","name":"Messaging Bridges","description":"Telegram, Discord, and Teams messaging bridges."}}]'
+              value: '[{"type":"mcp","url":"https://workspace-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"google-workspace","name":"Google Workspace","description":"Google Workspace MCP tools via OAuth 2.1."}},{"type":"mcp","url":"https://slack-mcp-210087613384.us-central1.run.app","path":"/mcp","auth_type":"oauth_2.1","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"slack-oauth","name":"Slack OAuth","description":"Slack workspace tools with OAuth 2.1."}},{"type":"mcp","url":"http://localhost:8001","path":"/sse","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"whatsapp-mcp","name":"WhatsApp MCP","description":"WhatsApp messaging with per-user session isolation via MCP."}},{"type":"openapi","url":"http://localhost:8005","path":"/openapi.json","auth_type":"none","headers":{},"key":"","config":{"enable":true,"function_name_filter_list":"","access_control":null},"info":{"id":"messaging","name":"Messaging Bridges","description":"Telegram, Discord, and Teams messaging bridges."}}]'
             - name: CRON_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -218,6 +218,29 @@ spec:
             httpGet:
               path: /health
               port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 20
+        - name: whatsapp-mcp
+          image: us-central1-docker.pkg.dev/flow-os-1769675656/javieros/whatsapp-mcp:latest
+          resources:
+            limits:
+              cpu: "0.5"
+              memory: 512Mi
+          env:
+            - name: WHATSAPP_BRIDGE_URL
+              value: "http://localhost:3000"
+            - name: WHATSAPP_BRIDGE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: whatsapp-bridge-token
+            - name: PORT
+              value: "8001"
+          startupProbe:
+            httpGet:
+              path: /sse
+              port: 8001
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 20
