@@ -239,7 +239,7 @@ spec:
               value: "8001"
           startupProbe:
             httpGet:
-              path: /sse
+              path: /health
               port: 8001
             initialDelaySeconds: 5
             periodSeconds: 5
