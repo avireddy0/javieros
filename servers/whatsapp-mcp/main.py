@@ -72,7 +72,9 @@ async def get_whatsapp_messages(ctx: Context, chat_id: Annotated[str, Field(desc
         msgs = r.get("messages", [])
         if not msgs: return "No messages found."
         lines = [f"[{'You' if m.get('from_me') else m.get('sender', '?')}]: {m.get('text', m.get('body', ''))}" for m in msgs]
-        return f"Messages ({len(msgs)}):\n" + "\n".join(lines)
+        return f"Messages ({len(msgs)}):
+" + "
+".join(lines)
     return str(r)
 
 @mcp.tool()
@@ -99,12 +101,26 @@ if __name__ == "__main__":
     from mcp.server.sse import SseServerTransport
     from starlette.applications import Starlette
     from starlette.routing import Route
+    from starlette.responses import JSONResponse
+    
     sse = SseServerTransport("/messages")
+    
     async def handle_sse(req):
         async with sse.connect_sse(req.scope, req.receive, req._send) as s:
             await mcp._mcp_server.run(s[0], s[1], mcp._mcp_server.create_initialization_options())
-    async def handle_msg(req): await sse.handle_post_message(req.scope, req.receive, req._send)
-    app = Starlette(routes=[Route("/sse", endpoint=handle_sse), Route("/messages", endpoint=handle_msg, methods=["POST"])])
+    
+    async def handle_msg(req): 
+        await sse.handle_post_message(req.scope, req.receive, req._send)
+    
+    async def handle_health(req):
+        return JSONResponse({"status": "ok"})
+    
+    app = Starlette(routes=[
+        Route("/health", endpoint=handle_health),
+        Route("/sse", endpoint=handle_sse),
+        Route("/messages", endpoint=handle_msg, methods=["POST"]),
+    ])
+    
     port = int(os.getenv("PORT", "8001"))
     logger.info(f"WhatsApp MCP on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port)
