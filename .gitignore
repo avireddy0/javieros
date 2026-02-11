@@ -10,3 +10,4 @@ secrets/
 
 # Reverse-engineered artifacts
 reverse/
+\!.env.example
