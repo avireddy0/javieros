@@ -40,7 +40,7 @@ async def _bridge(req, method, path, uid, body=None, timeout=30.0):
     except httpx.HTTPStatusError as e: return {"error": f"{e.response.status_code}: {e.response.text}"}
     except Exception as e: return {"error": str(e)}
 
-mcp = FastMCP("whatsapp", description="WhatsApp messaging with per-user sessions")
+mcp = FastMCP("whatsapp")
 
 @mcp.tool()
 async def get_whatsapp_status(ctx: Context) -> str:
