@@ -94,6 +94,10 @@ SLACK_SCOPES = [
     "stars:read",
 ]
 
+SLACK_TOKEN_REFRESH_SKEW_SECONDS = int(
+    os.getenv("SLACK_TOKEN_REFRESH_SKEW_SECONDS", "60")
+)
+
 
 # =============================================================================
 # Dynamic Client Registration Store
@@ -231,10 +235,17 @@ class GCSTokenStore:
         blob_name = self._get_blob_name(user_id, team_id)
         blob = self.bucket.blob(blob_name)
 
+        expires_at = None
+        if expires_in:
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            ).isoformat()
+
         token_data = {
             "access_token": access_token,
             "refresh_token": refresh_token,
             "expires_in": expires_in,
+            "expires_at": expires_at,
             "scopes": scopes or [],
             "team_id": team_id,
             "user_id": user_id,
@@ -255,7 +266,21 @@ class GCSTokenStore:
 
         try:
             content = await asyncio.to_thread(blob.download_as_string)
-            return json.loads(content)
+            token_data = json.loads(content)
+            if token_data.get("expires_at") is None:
+                created_at = token_data.get("created_at")
+                expires_in = token_data.get("expires_in")
+                if created_at and expires_in:
+                    try:
+                        created = datetime.fromisoformat(
+                            created_at.replace("Z", "+00:00")
+                        )
+                        token_data["expires_at"] = (
+                            created + timedelta(seconds=int(expires_in))
+                        ).isoformat()
+                    except Exception:
+                        pass
+            return token_data
         except Exception as e:
             logger.debug(f"Token not found in GCS for {user_id}@{team_id}: {e}")
             return None
@@ -578,6 +603,11 @@ async def _handle_slack_callback(request: Request):
         refresh_token = authed_user.get("refresh_token") or response.get("refresh_token")
         expires_in = authed_user.get("expires_in")
         scopes = authed_user.get("scope", "").split(",")
+        slack_token_expiry = None
+        if expires_in:
+            slack_token_expiry = datetime.now(timezone.utc) + timedelta(
+                seconds=int(expires_in)
+            )
 
         if not access_token or not user_id or not team_id:
             logger.error(
@@ -609,6 +639,8 @@ async def _handle_slack_callback(request: Request):
             scopes=scopes,
             code_challenge=code_challenge,
             slack_access_token=access_token,
+            slack_refresh_token=refresh_token,
+            slack_token_expiry=slack_token_expiry,
             expires_in_seconds=600,
         )
 
@@ -691,6 +723,8 @@ async def handle_authorization_code_grant(params: Dict[str, Any]) -> JSONRespons
     team_id = code_info["team_id"]
     scopes = code_info["scopes"]
     slack_access_token = code_info.get("slack_access_token")
+    slack_refresh_token = code_info.get("slack_refresh_token")
+    slack_token_expiry = code_info.get("slack_token_expiry")
 
     # Generate access token and refresh token
     access_token = secrets.token_urlsafe(32)
@@ -711,6 +745,8 @@ async def handle_authorization_code_grant(params: Dict[str, Any]) -> JSONRespons
         expiry=expiry,
         session_id=session_id,
         slack_access_token=slack_access_token,
+        slack_refresh_token=slack_refresh_token,
+        slack_token_expiry=slack_token_expiry,
     )
 
     # Return token response
@@ -745,12 +781,7 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
 
     # Find session by refresh token
     session_store = get_oauth21_session_store()
-    session_info = None
-
-    for session_key, info in session_store._sessions.items():
-        if hmac.compare_digest(info.get("refresh_token", ""), refresh_token):
-            session_info = info
-            break
+    session_info = session_store.get_session_by_refresh_token(refresh_token)
 
     if not session_info:
         raise HTTPException(status_code=400, detail="Invalid refresh_token")
@@ -758,6 +789,9 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
     user_id = session_info["user_id"]
     team_id = session_info["team_id"]
     scopes = session_info["scopes"]
+    slack_access_token = session_info.get("slack_access_token")
+    slack_refresh_token = session_info.get("slack_refresh_token")
+    slack_token_expiry = session_info.get("slack_token_expiry")
 
     # Generate new access token
     new_access_token = secrets.token_urlsafe(32)
@@ -776,6 +810,9 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
         scopes=scopes,
         expiry=expiry,
         session_id=session_info.get("session_id"),
+        slack_access_token=slack_access_token,
+        slack_refresh_token=slack_refresh_token,
+        slack_token_expiry=slack_token_expiry,
     )
 
     response = {
@@ -798,8 +835,139 @@ async def handle_refresh_token_grant(params: Dict[str, Any]) -> JSONResponse:
 # REST API Endpoints for Open WebUI External Tools
 # =============================================================================
 
+def _parse_expiry(value: Optional[Any]) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
+        except Exception:
+            return None
+    return None
 
-def _get_slack_client_from_token(request: Request) -> Optional[WebClient]:
+
+async def _refresh_slack_access_token(
+    user_id: str,
+    team_id: str,
+    refresh_token: str,
+) -> Optional[Dict[str, Any]]:
+    slack_client_id = os.getenv("SLACK_OAUTH_CLIENT_ID")
+    slack_client_secret = os.getenv("SLACK_OAUTH_CLIENT_SECRET")
+    if not slack_client_id or not slack_client_secret:
+        logger.error("Slack OAuth not configured for refresh token rotation")
+        return None
+
+    slack_client = WebClient()
+    try:
+        response = await asyncio.to_thread(
+            slack_client.oauth_v2_access,
+            client_id=slack_client_id,
+            client_secret=slack_client_secret,
+            grant_type="refresh_token",
+            refresh_token=refresh_token,
+        )
+    except SlackApiError as exc:
+        logger.error("Slack refresh token exchange failed: %s", exc)
+        return None
+
+    if not response.get("ok"):
+        logger.error("Slack refresh token exchange failed: %s", response.get("error"))
+        return None
+
+    authed_user = response.get("authed_user", {})
+    access_token = authed_user.get("access_token") or response.get("access_token")
+    new_refresh_token = (
+        authed_user.get("refresh_token")
+        or response.get("refresh_token")
+        or refresh_token
+    )
+    expires_in = authed_user.get("expires_in") or response.get("expires_in")
+    scopes = authed_user.get("scope", "")
+    scope_list = [s for s in scopes.split(",") if s] if scopes else []
+
+    if not access_token:
+        logger.error(
+            "Slack refresh response missing access token for %s@%s", user_id, team_id
+        )
+        return None
+
+    return {
+        "access_token": access_token,
+        "refresh_token": new_refresh_token,
+        "expires_in": expires_in,
+        "scopes": scope_list,
+    }
+
+
+async def _ensure_slack_access_token(
+    session_store,
+    session_info: Dict[str, Any],
+) -> Optional[str]:
+    slack_token = session_info.get("slack_access_token")
+    if not slack_token:
+        return None
+
+    expiry = _parse_expiry(session_info.get("slack_token_expiry"))
+    if not expiry:
+        return slack_token
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if expiry > now + timedelta(seconds=SLACK_TOKEN_REFRESH_SKEW_SECONDS):
+        return slack_token
+
+    user_id = session_info.get("user_id")
+    team_id = session_info.get("team_id")
+    refresh_token = session_info.get("slack_refresh_token")
+    gcs_store = get_gcs_token_store()
+    if not refresh_token and user_id and team_id:
+        token_data = await gcs_store.get_token(user_id, team_id)
+        refresh_token = token_data.get("refresh_token") if token_data else None
+
+    if not refresh_token or not user_id or not team_id:
+        logger.warning(
+            "Slack refresh token missing for %s@%s", user_id, team_id
+        )
+        return None
+
+    refreshed = await _refresh_slack_access_token(user_id, team_id, refresh_token)
+    if not refreshed:
+        return None
+
+    refreshed_access_token = refreshed["access_token"]
+    refreshed_refresh_token = refreshed["refresh_token"]
+    expires_in = refreshed.get("expires_in")
+    scopes = refreshed.get("scopes") or []
+
+    await gcs_store.store_token(
+        user_id=user_id,
+        team_id=team_id,
+        access_token=refreshed_access_token,
+        refresh_token=refreshed_refresh_token,
+        expires_in=expires_in,
+        scopes=scopes,
+    )
+
+    slack_token_expiry = (
+        datetime.now(timezone.utc) + timedelta(seconds=int(expires_in))
+        if expires_in
+        else None
+    )
+    session_store.update_slack_token(
+        user_id=user_id,
+        team_id=team_id,
+        slack_access_token=refreshed_access_token,
+        slack_refresh_token=refreshed_refresh_token,
+        slack_token_expiry=slack_token_expiry,
+    )
+
+    return refreshed_access_token
+
+
+async def _get_slack_client_from_token(request: Request) -> Optional[WebClient]:
     """Extract Slack client from Bearer token."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
@@ -809,18 +977,18 @@ def _get_slack_client_from_token(request: Request) -> Optional[WebClient]:
     session_store = get_oauth21_session_store()
 
     # Look up session by access token
-    for session_key, session_info in session_store._sessions.items():
-        if hmac.compare_digest(session_info.get("access_token", ""), token):
-            slack_token = session_info.get("slack_access_token")
-            if slack_token:
-                return WebClient(token=slack_token)
+    session_info = session_store.get_session_by_access_token(token)
+    if session_info:
+        slack_token = await _ensure_slack_access_token(session_store, session_info)
+        if slack_token:
+            return WebClient(token=slack_token)
     return None
 
 
 @server.custom_route("/api/channels", methods=["GET"])
 async def api_list_channels(request: Request):
     """REST API: List Slack channels."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(
             status_code=401, detail="Unauthorized - valid OAuth token required"
@@ -850,7 +1018,7 @@ async def api_list_channels(request: Request):
 @server.custom_route("/api/channels/{channel_id}", methods=["GET"])
 async def api_get_channel(request: Request):
     """REST API: Get channel info."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -865,7 +1033,7 @@ async def api_get_channel(request: Request):
 @server.custom_route("/api/channels/{channel_id}/history", methods=["GET"])
 async def api_get_channel_history(request: Request):
     """REST API: Get channel message history."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -886,7 +1054,7 @@ async def api_get_channel_history(request: Request):
 @server.custom_route("/api/messages", methods=["POST"])
 async def api_send_message(request: Request):
     """REST API: Send a message."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -915,7 +1083,7 @@ async def api_send_message(request: Request):
 @server.custom_route("/api/search", methods=["GET"])
 async def api_search_messages(request: Request):
     """REST API: Search messages."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -948,7 +1116,7 @@ async def api_search_messages(request: Request):
 @server.custom_route("/api/users", methods=["GET"])
 async def api_list_users(request: Request):
     """REST API: List users."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -969,7 +1137,7 @@ async def api_list_users(request: Request):
 @server.custom_route("/api/users/{user_id}", methods=["GET"])
 async def api_get_user(request: Request):
     """REST API: Get user info."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -985,7 +1153,7 @@ async def api_get_user(request: Request):
 @server.custom_route("/api/channels/{channel_id}/threads/{thread_ts}", methods=["GET"])
 async def api_get_thread_replies(request: Request):
     """REST API: Get thread replies."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1009,7 +1177,7 @@ async def api_get_thread_replies(request: Request):
 @server.custom_route("/api/dms", methods=["GET"])
 async def api_list_dms(request: Request):
     """REST API: List direct messages."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1029,7 +1197,7 @@ async def api_list_dms(request: Request):
 @server.custom_route("/api/reactions", methods=["POST"])
 async def api_add_reaction(request: Request):
     """REST API: Add reaction to a message."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1054,7 +1222,7 @@ async def api_add_reaction(request: Request):
 @server.custom_route("/api/files", methods=["GET"])
 async def api_list_files(request: Request):
     """REST API: List shared files."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1090,7 +1258,7 @@ async def api_list_files(request: Request):
 @server.custom_route("/api/channels/{channel_id}/pins", methods=["GET"])
 async def api_get_pins(request: Request):
     """REST API: Get pinned messages in a channel."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1119,7 +1287,7 @@ async def api_get_pins(request: Request):
 @server.custom_route("/api/channels/{channel_id}/bookmarks", methods=["GET"])
 async def api_get_bookmarks(request: Request):
     """REST API: Get bookmarks in a channel."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1143,7 +1311,7 @@ async def api_get_bookmarks(request: Request):
 @server.custom_route("/api/stars", methods=["GET"])
 async def api_get_stars(request: Request):
     """REST API: Get starred items."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -1173,7 +1341,7 @@ async def api_get_stars(request: Request):
 @server.custom_route("/api/me", methods=["GET"])
 async def api_get_me(request: Request):
     """REST API: Get authenticated user info."""
-    client = _get_slack_client_from_token(request)
+    client = await _get_slack_client_from_token(request)
     if not client:
         raise HTTPException(status_code=401, detail="Unauthorized")
 

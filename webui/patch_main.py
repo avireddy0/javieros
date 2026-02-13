@@ -96,12 +96,14 @@ async def oauth_client_callback(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="OAuth session expired or not found. Please retry the authorization flow.",
         )
-    return await oauth_client_manager.handle_callback(
+    response_out = await oauth_client_manager.handle_callback(
         request,
         client_id=client_id,
         user_id=user_id,
         response=response,
-    )"""
+    )
+    request.session.pop("oauth_user_id", None)
+    return response_out"""
 
 if old_callback in main_text:
     main_text = main_text.replace(old_callback, new_callback)

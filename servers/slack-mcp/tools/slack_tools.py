@@ -7,6 +7,7 @@ These tools get the authenticated Slack client from the session context or Beare
 
 import hmac
 import logging
+import os
 from typing import Optional
 
 from slack_sdk import WebClient
@@ -16,6 +17,9 @@ from server import server
 from auth.oauth21_session_store import get_oauth21_session_store, get_session_context
 
 logger = logging.getLogger(__name__)
+ALLOW_SESSION_FALLBACK = (
+    os.getenv("SLACK_ALLOW_SESSION_FALLBACK", "false").lower() == "true"
+)
 
 
 def _get_slack_client_from_bearer_token() -> Optional[WebClient]:
@@ -92,17 +96,12 @@ def _get_slack_client() -> Optional[WebClient]:
         logger.info("[AUTH] Got client from Bearer token")
         return client
 
-    # Try to find session from store (fallback)
-    store = get_oauth21_session_store()
-    session_count = len(store._sessions) if store._sessions else 0
-    logger.info(f"[AUTH] Fallback: checking {session_count} sessions in store")
-    if store._sessions:
-        # Get first available session with a Slack token
-        for session_key, session_info in store._sessions.items():
+    if ALLOW_SESSION_FALLBACK:
+        store = get_oauth21_session_store()
+        for session_info in store._sessions.values():
             slack_token = session_info.get("slack_access_token")
-            logger.info(f"[AUTH] Session {session_key}: has_slack_token={slack_token is not None}")
             if slack_token:
-                logger.info(f"[AUTH] Using Slack token from fallback session {session_key}")
+                logger.warning("Using Slack session fallback (debug mode)")
                 return WebClient(token=slack_token)
 
     logger.debug("No Slack authentication found")

@@ -53,6 +53,22 @@ class UserSession {
     this.reconnectTimer = null
   }
 
+  resetAuthState() {
+    try {
+      const sessionDir = this.getSessionDir()
+      if (!fs.existsSync(sessionDir)) return
+      const entries = fs.readdirSync(sessionDir)
+      entries.forEach((entry) => {
+        if (entry === 'history.json') return
+        const fullPath = path.join(sessionDir, entry)
+        fs.rmSync(fullPath, { recursive: true, force: true })
+      })
+      console.log(`[${this.userId}] Cleared auth state after logout`)
+    } catch (err) {
+      console.error(`[${this.userId}] Failed to reset auth state:`, err)
+    }
+  }
+
   loadHistory() {
     try {
       const historyFile = this.getHistoryFile()
@@ -181,6 +197,10 @@ class UserSession {
                 console.error(`[${this.userId}] Reconnect failed:`, err)
               })
             }, delay)
+          } else {
+            this.qrData = null
+            this.reconnectAttempts = 0
+            this.resetAuthState()
           }
         } else if (connection === 'open') {
           this.isReady = true
@@ -388,6 +408,18 @@ function cleanupIdleSessions() {
 // Schedule idle session cleanup every 6 hours
 const cleanupTimer = setInterval(cleanupIdleSessions, 6 * 60 * 60 * 1000)
 cleanupTimer.unref()
+
+function cleanupRateLimits() {
+  const now = Date.now()
+  for (const [key, entry] of rateState.entries()) {
+    if (!entry?.resetAt || now - entry.resetAt > RATE_LIMIT_WINDOW_MS * 2) {
+      rateState.delete(key)
+    }
+  }
+}
+
+const rateCleanupTimer = setInterval(cleanupRateLimits, 5 * 60 * 1000)
+rateCleanupTimer.unref()
 
 // Routes
 app.get('/health', (req, res) => {

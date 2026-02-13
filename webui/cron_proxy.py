@@ -21,6 +21,8 @@ MEMORY_SERVICE_BASE_URL = os.environ.get(
 )
 CRON_TOKEN = "".join(os.environ.get("CRON_TOKEN", "").split())
 CRON_OIDC_AUDIENCE = os.environ.get("CRON_OIDC_AUDIENCE", "")
+CRON_OIDC_EMAIL = os.environ.get("CRON_OIDC_EMAIL", "")
+CRON_OIDC_SUB = os.environ.get("CRON_OIDC_SUB", "")
 
 PROXY_TIMEOUT = aiohttp.ClientTimeout(
     total=180
@@ -56,9 +58,33 @@ def _validate_oidc_token(request: Request) -> None:
             raise HTTPException(
                 status_code=403, detail=f"Invalid OIDC issuer: {issuer}"
             )
+        if CRON_OIDC_EMAIL:
+            claim_email = claims.get("email")
+            if claim_email != CRON_OIDC_EMAIL:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid OIDC email claim",
+                )
+            if claims.get("email_verified") is False:
+                raise HTTPException(
+                    status_code=403,
+                    detail="OIDC email not verified",
+                )
+
+        if CRON_OIDC_SUB:
+            claim_sub = claims.get("sub")
+            if claim_sub != CRON_OIDC_SUB:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Invalid OIDC subject claim",
+                )
+
         logger.info("OIDC validation passed: sub=%s", claims.get("sub"))
     except ImportError:
-        logger.warning("google-auth not installed, skipping OIDC validation")
+        raise HTTPException(
+            status_code=503,
+            detail="OIDC validation unavailable (google-auth not installed)",
+        )
     except HTTPException:
         raise
     except Exception as e:

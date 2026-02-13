@@ -8,10 +8,10 @@ authorization code flow, and token storage.
 
 import contextvars
 import logging
-import hmac
 import json
 import hashlib
 import secrets
+import os
 from typing import Dict, Optional, Any, Tuple
 from threading import RLock
 from datetime import datetime, timedelta, timezone
@@ -122,11 +122,10 @@ def extract_session_from_headers(headers: Dict[str, str]) -> Optional[str]:
     if auth_header and auth_header.lower().startswith("bearer "):
         token = auth_header[7:]  # Remove "Bearer " prefix
         if token:
-            # Look for a session that has this access token
             store = get_oauth21_session_store()
-            for session_key, session_info in store._sessions.items():
-                if hmac.compare_digest(session_info.get("access_token", ""), token):
-                    return session_info.get("session_id") or f"bearer_{session_key}"
+            session_info = store.get_session_by_access_token(token)
+            if session_info:
+                return session_info.get("session_id") or f"bearer_{token[:8]}"
 
         # If no session found, create a temporary session ID from token hash
         token_hash = hashlib.sha256(token.encode()).hexdigest()[:8]
@@ -160,6 +159,10 @@ class OAuth21SessionStore:
     MAX_OAUTH_STATES = 500
     MAX_AUTH_CODES = 500
     MAX_DYNAMIC_CLIENTS = 50
+    PERSIST_PATH = os.getenv(
+        "OAUTH_SESSIONS_PATH",
+        "/app/store_creds/oauth_sessions.json",
+    )
 
     def __init__(self):
         logger.warning(
@@ -187,7 +190,114 @@ class OAuth21SessionStore:
         # Dynamic client registrations: client_id -> client_info
         self._dynamic_clients: Dict[str, Dict[str, Any]] = {}
 
+        # Token indexes for O(1) lookup
+        self._access_token_index: Dict[str, str] = {}
+        self._refresh_token_index: Dict[str, str] = {}
+
         self._lock = RLock()
+        self._load_sessions()
+
+    # =========================================================================
+    # Persistence + Index Helpers
+    # =========================================================================
+
+    def _serialize_session_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        serialized = dict(info)
+        for key in ("expiry", "slack_token_expiry"):
+            value = serialized.get(key)
+            if isinstance(value, datetime):
+                serialized[key] = value.isoformat()
+        return serialized
+
+    def _deserialize_session_info(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        deserialized = dict(info)
+        for key in ("expiry", "slack_token_expiry"):
+            value = deserialized.get(key)
+            if isinstance(value, str):
+                deserialized[key] = self._normalize_expiry(value)
+        return deserialized
+
+    def _rebuild_token_indexes_locked(self) -> None:
+        self._access_token_index = {}
+        self._refresh_token_index = {}
+        for session_key, session_info in self._sessions.items():
+            access_token = session_info.get("access_token")
+            refresh_token = session_info.get("refresh_token")
+            if access_token:
+                self._access_token_index[access_token] = session_key
+            if refresh_token:
+                self._refresh_token_index[refresh_token] = session_key
+
+    def _save_sessions_locked(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.PERSIST_PATH), exist_ok=True)
+            payload = {
+                "sessions": {
+                    key: self._serialize_session_info(value)
+                    for key, value in self._sessions.items()
+                },
+                "mcp_session_mapping": self._mcp_session_mapping,
+                "session_auth_binding": self._session_auth_binding,
+                "saved_at": datetime.now(timezone.utc).isoformat(),
+            }
+            with open(self.PERSIST_PATH, "w") as handle:
+                json.dump(payload, handle, indent=2)
+        except Exception as exc:
+            logger.warning("Failed to persist OAuth sessions: %s", exc)
+
+    def _load_sessions(self) -> None:
+        try:
+            if not os.path.exists(self.PERSIST_PATH):
+                return
+            with open(self.PERSIST_PATH, "r") as handle:
+                payload = json.load(handle)
+            sessions = payload.get("sessions", {})
+            mcp_mapping = payload.get("mcp_session_mapping", {})
+            auth_binding = payload.get("session_auth_binding", {})
+            with self._lock:
+                self._sessions = {
+                    key: self._deserialize_session_info(value)
+                    for key, value in sessions.items()
+                }
+                self._mcp_session_mapping = dict(mcp_mapping)
+                self._session_auth_binding = dict(auth_binding)
+                self._rebuild_token_indexes_locked()
+                self._cleanup_expired_sessions_locked()
+            logger.info(
+                "Loaded %d OAuth session(s) from %s",
+                len(self._sessions),
+                self.PERSIST_PATH,
+            )
+        except Exception as exc:
+            logger.warning("Failed to load OAuth sessions: %s", exc)
+
+    def _cleanup_expired_sessions_locked(self) -> None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expired_keys = []
+        for session_key, session_info in self._sessions.items():
+            expiry = session_info.get("expiry")
+            if isinstance(expiry, str):
+                expiry = self._normalize_expiry(expiry)
+            if expiry and expiry <= now:
+                expired_keys.append(session_key)
+
+        for session_key in expired_keys:
+            session_info = self._sessions.pop(session_key, None) or {}
+            access_token = session_info.get("access_token")
+            refresh_token = session_info.get("refresh_token")
+            if access_token:
+                self._access_token_index.pop(access_token, None)
+            if refresh_token:
+                self._refresh_token_index.pop(refresh_token, None)
+            for key, value in list(self._mcp_session_mapping.items()):
+                if value == session_key:
+                    del self._mcp_session_mapping[key]
+            for key, value in list(self._session_auth_binding.items()):
+                if value == session_key:
+                    del self._session_auth_binding[key]
+
+        if expired_keys:
+            logger.info("Removed %d expired OAuth session(s)", len(expired_keys))
 
     # =========================================================================
     # OAuth State Management
@@ -318,6 +428,8 @@ class OAuth21SessionStore:
         scopes: list,
         code_challenge: Optional[str] = None,
         slack_access_token: Optional[str] = None,
+        slack_refresh_token: Optional[str] = None,
+        slack_token_expiry: Optional[Any] = None,
         expires_in_seconds: int = 600,
     ) -> None:
         """
@@ -346,6 +458,8 @@ class OAuth21SessionStore:
                 "expires_at": expiry,
                 "created_at": now,
                 "used": False,
+                "slack_refresh_token": slack_refresh_token,
+                "slack_token_expiry": self._normalize_expiry(slack_token_expiry),
             }
             logger.debug(f"Stored authorization code for {user_id}@{team_id}")
 
@@ -443,6 +557,8 @@ class OAuth21SessionStore:
         bot_user_id: Optional[str] = None,
         enterprise_id: Optional[str] = None,
         slack_access_token: Optional[str] = None,
+        slack_refresh_token: Optional[str] = None,
+        slack_token_expiry: Optional[Any] = None,
     ):
         """
         Store OAuth 2.1 session information.
@@ -462,8 +578,21 @@ class OAuth21SessionStore:
             slack_access_token: The real Slack access token for API calls
         """
         with self._lock:
+            self._cleanup_expired_sessions_locked()
             session_key = f"slack_{team_id}_{user_id}"
+            if session_key not in self._sessions and len(self._sessions) >= self.MAX_SESSIONS:
+                raise ValueError("Too many active sessions — possible abuse")
             normalized_expiry = self._normalize_expiry(expiry)
+            normalized_slack_expiry = self._normalize_expiry(slack_token_expiry)
+
+            existing = self._sessions.get(session_key)
+            if existing:
+                old_access_token = existing.get("access_token")
+                old_refresh_token = existing.get("refresh_token")
+                if old_access_token:
+                    self._access_token_index.pop(old_access_token, None)
+                if old_refresh_token:
+                    self._refresh_token_index.pop(old_refresh_token, None)
 
             session_info = {
                 "user_id": user_id,
@@ -478,10 +607,16 @@ class OAuth21SessionStore:
                 "bot_user_id": bot_user_id,
                 "enterprise_id": enterprise_id,
                 "slack_access_token": slack_access_token,
+                "slack_refresh_token": slack_refresh_token,
+                "slack_token_expiry": normalized_slack_expiry,
                 "issuer": "https://slack.com",
             }
 
             self._sessions[session_key] = session_info
+            if access_token:
+                self._access_token_index[access_token] = session_key
+            if refresh_token:
+                self._refresh_token_index[refresh_token] = session_key
 
             # Store MCP session mapping if provided
             if mcp_session_id:
@@ -514,6 +649,8 @@ class OAuth21SessionStore:
             if session_id and session_id not in self._session_auth_binding:
                 self._session_auth_binding[session_id] = session_key
 
+            self._save_sessions_locked()
+
     def get_session(self, user_id: str, team_id: str) -> Optional[Dict[str, Any]]:
         """
         Get session information for a user.
@@ -528,6 +665,53 @@ class OAuth21SessionStore:
         with self._lock:
             session_key = f"slack_{team_id}_{user_id}"
             return self._sessions.get(session_key)
+
+    def get_session_by_access_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Get session by OAuth access token in O(1)."""
+        if not token:
+            return None
+        with self._lock:
+            self._cleanup_expired_sessions_locked()
+            session_key = self._access_token_index.get(token)
+            if not session_key:
+                return None
+            return self._sessions.get(session_key)
+
+    def get_session_by_refresh_token(self, token: str) -> Optional[Dict[str, Any]]:
+        """Get session by OAuth refresh token in O(1)."""
+        if not token:
+            return None
+        with self._lock:
+            self._cleanup_expired_sessions_locked()
+            session_key = self._refresh_token_index.get(token)
+            if not session_key:
+                return None
+            return self._sessions.get(session_key)
+
+    def update_slack_token(
+        self,
+        user_id: str,
+        team_id: str,
+        slack_access_token: str,
+        slack_refresh_token: Optional[str] = None,
+        slack_token_expiry: Optional[Any] = None,
+    ) -> bool:
+        """Update Slack access/refresh tokens for a session."""
+        with self._lock:
+            session_key = f"slack_{team_id}_{user_id}"
+            session_info = self._sessions.get(session_key)
+            if not session_info:
+                return False
+            session_info["slack_access_token"] = slack_access_token
+            if slack_refresh_token is not None:
+                session_info["slack_refresh_token"] = slack_refresh_token
+            if slack_token_expiry is not None:
+                session_info["slack_token_expiry"] = self._normalize_expiry(
+                    slack_token_expiry
+                )
+            self._sessions[session_key] = session_info
+            self._save_sessions_locked()
+            return True
 
     def get_session_by_mcp_session(
         self, mcp_session_id: str
@@ -560,9 +744,15 @@ class OAuth21SessionStore:
                 session_info = self._sessions.get(session_key, {})
                 mcp_session_id = session_info.get("mcp_session_id")
                 session_id = session_info.get("session_id")
+                access_token = session_info.get("access_token")
+                refresh_token = session_info.get("refresh_token")
 
                 # Remove from sessions
                 del self._sessions[session_key]
+                if access_token:
+                    self._access_token_index.pop(access_token, None)
+                if refresh_token:
+                    self._refresh_token_index.pop(refresh_token, None)
 
                 # Remove from MCP mapping if exists
                 if mcp_session_id and mcp_session_id in self._mcp_session_mapping:
@@ -575,6 +765,7 @@ class OAuth21SessionStore:
                     del self._session_auth_binding[session_id]
 
                 logger.info(f"Removed OAuth 2.1 session for {user_id}@{team_id}")
+                self._save_sessions_locked()
 
     def has_session(self, user_id: str, team_id: str) -> bool:
         """Check if a user has an active session."""
